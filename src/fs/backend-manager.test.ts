@@ -45,7 +45,7 @@ function createDeps(settings: AirSyncSettings, overrides: Partial<BackendManager
 	return {
 		getSettings: () => settings,
 		saveSettings: vi.fn().mockResolvedValue(undefined),
-		getApp: (() => ({})) as unknown as BackendManagerDeps["getApp"],
+		getApp: (() => ({ vault: { configDir: ".obsidian", adapter: { writeBinary: vi.fn().mockResolvedValue(undefined) } } })) as unknown as BackendManagerDeps["getApp"], // eslint-disable-line obsidianmd/hardcoded-config-path -- test only; real code uses app.vault.configDir
 		getLogger: () => noopLogger,
 		getVaultName: () => "Test Vault",
 		onConnected: vi.fn(),
@@ -53,6 +53,10 @@ function createDeps(settings: AirSyncSettings, overrides: Partial<BackendManager
 		onIdentityChanged: vi.fn().mockResolvedValue(undefined),
 		notify: vi.fn(),
 		refreshSettingsDisplay: vi.fn(),
+		hasSyncHistory: vi.fn().mockResolvedValue(false),
+		localHasContentFiles: vi.fn().mockReturnValue(false),
+		reloadSettings: vi.fn().mockResolvedValue(undefined),
+		promptJoinConflict: vi.fn().mockResolvedValue("cancel" as const),
 		...overrides,
 	};
 }
@@ -248,7 +252,7 @@ describe("BackendManager — isConnecting flag", () => {
 		fakeProvider.resolveRemoteVault = async () => {
 			connectingDuringInit = mgr.isConnecting();
 			await blocker;
-			return { backendUpdates: {} };
+			return { backendUpdates: {}, wasCreated: false };
 		};
 
 		const initPromise = mgr.initBackend();
@@ -295,7 +299,7 @@ describe("BackendManager — isConnecting flag", () => {
 
 		fakeProvider.resolveRemoteVault = async () => {
 			await blocker;
-			return { backendUpdates: {} };
+			return { backendUpdates: {}, wasCreated: false };
 		};
 
 		const first = mgr.initBackend();
@@ -363,6 +367,123 @@ describe("BackendManager — isConnecting flag", () => {
 		expect(mgr.isConnecting()).toBe(false);
 	});
 
+	it("completeBackendConnect shows 'creating' toast when wasCreated=true", async () => {
+		const settings = mockSettings();
+		const deps = createDeps(settings);
+		const mgr = new BackendManager(deps);
+
+		await mgr.initBackend();
+
+		fakeProvider.auth.completeAuth = () => Promise.resolve({});
+		fakeProvider.resolveRemoteVault = () => Promise.resolve({ backendUpdates: {}, wasCreated: true });
+
+		await mgr.completeBackendConnect("auth-code");
+
+		expect(deps.notify).toHaveBeenCalledWith(
+			expect.stringContaining("creating one")
+		);
+	});
+
+	it("completeBackendConnect shows 'resuming' toast when wasCreated=false and hasSyncHistory=true", async () => {
+		const settings = mockSettings();
+		const deps = createDeps(settings, {
+			hasSyncHistory: vi.fn().mockResolvedValue(true),
+		});
+		const mgr = new BackendManager(deps);
+
+		await mgr.initBackend();
+
+		fakeProvider.auth.completeAuth = () => Promise.resolve({});
+		fakeProvider.resolveRemoteVault = () => Promise.resolve({ backendUpdates: {}, wasCreated: false });
+
+		await mgr.completeBackendConnect("auth-code");
+
+		expect(deps.notify).toHaveBeenCalledWith(
+			expect.stringContaining("Resuming sync")
+		);
+	});
+
+	it("completeBackendConnect shows 'downloading' toast and seeds settings when fresh device joins", async () => {
+		const settings = mockSettings();
+		const deps = createDeps(settings, {
+			hasSyncHistory: vi.fn().mockResolvedValue(false),
+			localHasContentFiles: vi.fn().mockReturnValue(false),
+		});
+		const mgr = new BackendManager(deps);
+
+		await mgr.initBackend();
+
+		fakeProvider.auth.completeAuth = () => Promise.resolve({});
+		fakeProvider.resolveRemoteVault = () => Promise.resolve({ backendUpdates: {}, wasCreated: false });
+
+		await mgr.completeBackendConnect("auth-code");
+
+		expect(deps.notify).toHaveBeenCalledWith(
+			expect.stringContaining("Downloading")
+		);
+		expect(deps.reloadSettings).toHaveBeenCalled();
+	});
+
+	it("completeBackendConnect prompts user when local has content and no sync history", async () => {
+		const settings = mockSettings();
+		const deps = createDeps(settings, {
+			hasSyncHistory: vi.fn().mockResolvedValue(false),
+			localHasContentFiles: vi.fn().mockReturnValue(true),
+			promptJoinConflict: vi.fn().mockResolvedValue("cancel" as const),
+		});
+		const mgr = new BackendManager(deps);
+
+		await mgr.initBackend();
+
+		fakeProvider.auth.completeAuth = () => Promise.resolve({});
+		fakeProvider.resolveRemoteVault = () => Promise.resolve({ backendUpdates: {}, wasCreated: false });
+
+		await mgr.completeBackendConnect("auth-code");
+
+		expect(deps.promptJoinConflict).toHaveBeenCalledWith("Test Vault");
+	});
+
+	it("completeBackendConnect disconnects when user cancels conflict", async () => {
+		const settings = mockSettings();
+		const deps = createDeps(settings, {
+			hasSyncHistory: vi.fn().mockResolvedValue(false),
+			localHasContentFiles: vi.fn().mockReturnValue(true),
+			promptJoinConflict: vi.fn().mockResolvedValue("cancel" as const),
+		});
+		const mgr = new BackendManager(deps);
+
+		await mgr.initBackend();
+
+		fakeProvider.auth.completeAuth = () => Promise.resolve({});
+		fakeProvider.resolveRemoteVault = () => Promise.resolve({ backendUpdates: {}, wasCreated: false });
+		fakeProvider.disconnect = vi.fn().mockResolvedValue({});
+
+		await mgr.completeBackendConnect("auth-code");
+
+		expect(deps.onDisconnected).toHaveBeenCalled();
+	});
+
+	it("completeBackendConnect seeds settings and proceeds when user chooses combine", async () => {
+		const settings = mockSettings();
+		const deps = createDeps(settings, {
+			hasSyncHistory: vi.fn().mockResolvedValue(false),
+			localHasContentFiles: vi.fn().mockReturnValue(true),
+			promptJoinConflict: vi.fn().mockResolvedValue("combine" as const),
+		});
+		const mgr = new BackendManager(deps);
+
+		await mgr.initBackend();
+
+		fakeProvider.auth.completeAuth = () => Promise.resolve({});
+		fakeProvider.resolveRemoteVault = () => Promise.resolve({ backendUpdates: {}, wasCreated: false });
+
+		await mgr.completeBackendConnect("auth-code");
+
+		expect(deps.reloadSettings).toHaveBeenCalled();
+		// Should NOT disconnect
+		expect(deps.onDisconnected).not.toHaveBeenCalled();
+	});
+
 	it("completeBackendConnect is ignored when initBackend is in progress", async () => {
 		const settings = mockSettings();
 		const deps = createDeps(settings);
@@ -373,7 +494,7 @@ describe("BackendManager — isConnecting flag", () => {
 
 		fakeProvider.resolveRemoteVault = async () => {
 			await blocker;
-			return { backendUpdates: {} };
+			return { backendUpdates: {}, wasCreated: false };
 		};
 
 		const initPromise = mgr.initBackend();

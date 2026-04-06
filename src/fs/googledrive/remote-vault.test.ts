@@ -72,6 +72,7 @@ describe("resolveGDriveRemoteVault", () => {
 				remoteVaultFolderId: "vault-folder-id",
 				lastKnownVaultName: "My Vault",
 			});
+			expect(result.wasCreated).toBe(true);
 
 			// Verify root folder lookup
 			expect(mock.findChildByName).toHaveBeenCalledWith("root", REMOTE_VAULT_ROOT, FOLDER_MIME);
@@ -108,6 +109,7 @@ describe("resolveGDriveRemoteVault", () => {
 				remoteVaultFolderId: "existing-vault-folder-id",
 				lastKnownVaultName: "My Vault",
 			});
+			expect(result.wasCreated).toBe(false);
 		});
 	});
 
@@ -129,6 +131,7 @@ describe("resolveGDriveRemoteVault", () => {
 				remoteVaultFolderId: "vault-folder-id",
 				lastKnownVaultName: "My Vault",
 			});
+			expect(result.wasCreated).toBe(false);
 			// Should NOT search for root folder — goes straight to getFile
 			expect(mock.findChildByName).not.toHaveBeenCalledWith("root", expect.anything(), expect.anything());
 		});
@@ -162,6 +165,7 @@ describe("resolveGDriveRemoteVault", () => {
 				remoteVaultFolderId: "vault-folder-id",
 				lastKnownVaultName: "New Name",
 			});
+			expect(result.wasCreated).toBe(false);
 			// Verify metadata was updated (uploadFile called with existingFileId)
 			expect(mock.uploadFile).toHaveBeenCalledWith(
 				"metadata.json", "ss-id",
@@ -192,6 +196,7 @@ describe("resolveGDriveRemoteVault", () => {
 				remoteVaultFolderId: "new-vault-id",
 				lastKnownVaultName: "My Vault",
 			});
+			expect(result.wasCreated).toBe(true);
 		});
 	});
 });

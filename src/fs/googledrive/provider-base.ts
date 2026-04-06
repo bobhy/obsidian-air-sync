@@ -79,8 +79,12 @@ export abstract class GoogleDriveAuthProviderBase implements IAuthProvider {
 			if (!auth) return {};
 
 			const url = await auth.getAuthorizationUrl();
-			const pendingAuthState = auth.getAuthState() ?? "";
-			const pendingCodeVerifier = auth.getCodeVerifier() ?? "";
+			// Auth state and code verifier are kept in memory only; if the plugin reloads
+			// before the user completes auth, they must restart the flow
+			console.debug("[AirSync] Auth flow started", {
+				hasState: !!auth.getAuthState(),
+				hasVerifier: !!auth.getCodeVerifier(),
+			});
 
 			if (Platform.isMobile) {
 				window.location.href = url;
@@ -89,7 +93,7 @@ export abstract class GoogleDriveAuthProviderBase implements IAuthProvider {
 			}
 			new Notice("Complete authorization in your browser");
 
-			return { pendingAuthState, pendingCodeVerifier };
+			return {};
 		} catch (err) {
 			const msg = err instanceof Error ? err.message : String(err);
 			throw new Error(`Failed to start authorization: ${msg}`);
@@ -100,17 +104,14 @@ export abstract class GoogleDriveAuthProviderBase implements IAuthProvider {
 		input: string,
 		backendData: Record<string, unknown>,
 	): Promise<Record<string, unknown>> {
-		const data = backendData as Partial<GoogleDriveBackendData & { pendingCodeVerifier?: string }>;
 		const auth = this.createAuthIfNeeded(backendData);
 		if (!auth) {
 			throw new Error("OAuth credentials are missing");
 		}
-		// Restore CSRF state and PKCE verifier if auth lacks them (survives plugin reload)
-		if (!auth.getAuthState() && data.pendingAuthState) {
-			auth.setAuthState(data.pendingAuthState);
-		}
-		if (!auth.getCodeVerifier() && data.pendingCodeVerifier) {
-			auth.setCodeVerifier(data.pendingCodeVerifier);
+		// Auth state and code verifier are memory-only; if the plugin reloaded between
+		// startAuth and completeAuth, these will be absent and the flow will fail
+		if (!auth.getAuthState()) {
+			console.debug("[AirSync] Auth state not in memory; plugin may have reloaded mid-flow — restart auth if this fails");
 		}
 
 		const params = parseAuthCallbackParams(input);
@@ -125,8 +126,6 @@ export abstract class GoogleDriveAuthProviderBase implements IAuthProvider {
 
 		return {
 			accessTokenExpiry: tokens.accessTokenExpiry,
-			pendingAuthState: "",
-			pendingCodeVerifier: "",
 		};
 	}
 
@@ -179,19 +178,14 @@ export abstract class GoogleDriveProviderBase implements IBackendProvider {
 		if (!tokens.refreshToken || !data.remoteVaultFolderId) return null;
 
 		const googleAuth = this.auth.getOrCreateGoogleAuth(data, logger);
-		googleAuth.setTokens(tokens.refreshToken, tokens.accessToken, data.accessTokenExpiry);
+		googleAuth.setTokens(tokens.refreshToken, tokens.accessToken, data.accessTokenExpiry ?? 0);
 		const client = new DriveClient((force) => googleAuth.getAccessToken(force), logger);
 		const metadataStore = new MetadataStore<DriveFile>(`${settings.vaultId}-${data.remoteVaultFolderId}`, {
 			dbNamePrefix: "air-sync-drive",
 			version: 1,
 		});
-		const fs = new GoogleDriveFs(client, data.remoteVaultFolderId, logger, metadataStore);
-
-		if (data.changesStartPageToken) {
-			fs.changesPageToken = data.changesStartPageToken;
-		}
-
-		return fs;
+		// changesStartPageToken is owned by MetadataStore IDB — not seeded from settings
+		return new GoogleDriveFs(client, data.remoteVaultFolderId, logger, metadataStore);
 	}
 
 	isConnected(settings: AirSyncSettings): boolean {
@@ -204,19 +198,16 @@ export abstract class GoogleDriveProviderBase implements IBackendProvider {
 		return `${this.type}:${data.remoteVaultFolderId}`;
 	}
 
-	resetTargetState(settings: AirSyncSettings): void {
-		const data = settings.backendData[this.type];
-		if (data) {
-			delete data.changesStartPageToken;
-		}
+	resetTargetState(_settings: AirSyncSettings): void {
+		// changesStartPageToken is now owned by MetadataStore IDB, keyed by remoteVaultFolderId,
+		// so it resets automatically when the remote target changes
 	}
 
 	readBackendState(fs: IFileSystem): Record<string, unknown> {
 		if (!(fs instanceof GoogleDriveFs)) return {};
 		const result: Record<string, unknown> = {};
 
-		const pageToken = fs.changesPageToken;
-		if (pageToken) result.changesStartPageToken = pageToken;
+		// changesStartPageToken is persisted by MetadataStore IDB — not written here
 
 		// Store refreshed tokens in SecretStorage (not in backendData)
 		const tokens = this.auth.getTokenState();
@@ -240,7 +231,7 @@ export abstract class GoogleDriveProviderBase implements IBackendProvider {
 		const data = this.getData(settings);
 		const tokens = readTokens(this.secretStore, this.type);
 		const googleAuth = this.auth.getOrCreateGoogleAuth(data, logger);
-		googleAuth.setTokens(tokens.refreshToken, tokens.accessToken, data.accessTokenExpiry);
+		googleAuth.setTokens(tokens.refreshToken, tokens.accessToken, data.accessTokenExpiry ?? 0);
 		const client = new DriveClient((force) => googleAuth.getAccessToken(force), logger);
 		const cachedFolderId = data.remoteVaultFolderId || undefined;
 		return resolveGDriveRemoteVault(client, vaultName, cachedFolderId, logger);

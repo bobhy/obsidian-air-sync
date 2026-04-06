@@ -107,7 +107,7 @@ export class AirSyncSettingTab extends PluginSettingTab {
 			)
 			.addTextArea((text) =>
 				text
-					.setPlaceholder(".templates\n.stversions")
+					.setPlaceholder(`${this.app.vault.configDir}/plugins/obsidian-air-sync`)
 					.setValue(
 						this.plugin.settings.syncDotPaths.join("\n")
 					)

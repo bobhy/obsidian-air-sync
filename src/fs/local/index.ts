@@ -22,6 +22,13 @@ export class LocalFs implements IFileSystem {
 		);
 	}
 
+	/** True if the vault contains at least one non-dot-prefixed file (i.e. user content). */
+	hasContentFiles(): boolean {
+		return this.vault.getAllLoadedFiles().some(
+			(f) => f instanceof TFile && !f.path.startsWith(".")
+		);
+	}
+
 	async list(): Promise<FileEntity[]> {
 		const entities: FileEntity[] = [];
 		const allFiles = this.vault.getAllLoadedFiles();

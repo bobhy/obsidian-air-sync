@@ -53,6 +53,7 @@ async function resolveLinked(
 
 	return {
 		backendUpdates: { remoteVaultFolderId: cachedFolderId, lastKnownVaultName: vaultName },
+		wasCreated: false,
 	};
 }
 
@@ -73,6 +74,7 @@ async function resolveNew(
 			logger?.info("Found existing remote vault", { folderId: folder.id, vaultName });
 			return {
 				backendUpdates: { remoteVaultFolderId: folder.id, lastKnownVaultName: vaultName },
+				wasCreated: false,
 			};
 		}
 	}
@@ -87,6 +89,7 @@ async function resolveNew(
 
 	return {
 		backendUpdates: { remoteVaultFolderId: vaultFolder.id, lastKnownVaultName: vaultName },
+		wasCreated: true,
 	};
 }
 
