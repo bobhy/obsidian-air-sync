@@ -202,7 +202,7 @@ export default class AirSyncPlugin extends Plugin {
 	}
 
 	async loadSettings() {
-		const diskData = (await this.loadData()) as Partial<AirSyncSettings>;
+		const diskData = ((await this.loadData()) ?? {}) as Partial<AirSyncSettings>;
 		const instanceData = await this.instanceStore.load(this.vaultKey);
 
 		// Bootstrap: if InstanceStore is empty (first run after upgrade to this version),
