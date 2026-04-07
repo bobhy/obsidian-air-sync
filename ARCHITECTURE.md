@@ -314,9 +314,17 @@ attempt by the backend provider. It locates (or creates) the vault's UUID folder
 `obsidian-air-sync/` in Google Drive and returns its folder ID for use by `GoogleDriveFs`.
 
 **Fast path (cached folder ID known):** `getFile` verifies the cached folder is still accessible,
-then `updateMetadataIfNeeded` recreates `.airsync/metadata.json` if it was deleted. A non-destructive
-sibling scan then checks for duplicate vault folders with the same name and fires a toast warning if
-any are found. The cached folder is always used regardless.
+then `readMetadata` reads `.airsync/metadata.json` once:
+
+- If metadata exists and the vault name matches → proceed (no write).
+- If metadata exists but the vault name differs → `VaultNameMismatchModal` explains the situation
+  and the connection fails. The user must rename the local vault to match the remote name before
+  retrying. (This guards against one device renaming the vault while others still have the old name
+  cached.)
+- If metadata is missing → `updateMetadataIfNeeded` recreates it.
+
+A non-destructive sibling scan then checks for duplicate vault folders with the same name and fires
+a toast warning if any are found. The cached folder is always used regardless.
 
 **Fresh connect (no cached folder ID):** All sibling UUID folders under the root are scanned and
 their `metadata.json` files read to collect every folder that claims the same vault name:
@@ -327,8 +335,8 @@ their `metadata.json` files read to collect every folder that claims the same va
   must remove the extra folder(s) in Google Drive before retrying.
 
 The `RemoteVaultCallbacks` interface decouples the resolution logic from UI: callers provide
-`notify` (toast) and `promptDuplicateVaults` (modal) callbacks; tests omit them to get plain error
-throws.
+`notify` (toast), `promptDuplicateVaults`, and `promptVaultNameMismatch` (modal) callbacks; tests
+omit them to get plain error throws.
 
 ## Startup safety: stale sync state
 

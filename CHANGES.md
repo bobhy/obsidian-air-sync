@@ -9,11 +9,21 @@ and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0
 
 ### Added
 
-- Feat: Check for duplicate remote vaults on connect. 
-  When connecting to Google Drive, all vault folders
-  under `obsidian-air-sync/` are scanned for the same vault name. If duplicates are found but one matches the previously connected folder (cached folder ID),
-  the user is warned, but the matching folder is used. If duplicates are found with no
-  tiebreaker, the user gets a modal then the connection fails — the user must remove the  duplicate folder from Google Drive before retrying.
+- Feat: Handle rename of shared remote vault (imperfectly).
+  Because Obsidian doesn't notify plugin when vault is renamed by Obsidian vault manager...
+  For now: when multiple devices sync to same remote vault:
+  1. on one device, rename the vault via Obsidian vault manager, then *restart* Obsidian and check that the plugin reconnects.
+  2. then, on all the other devices using the old vault name, change it to the new.  
+  If you happen to restart Obsidian on any device still using the old vault name before you complete step 2,
+  the plugin will notice that the remote vault doesn't match the devices's (old) name, and refuse to connect.
+  This is your reminder to rename the vault on this device.
+  
+- Feat: Check for duplicate remote vaults on connect.
+  When connecting to Google Drive, all vault folders under `obsidian-air-sync/` are scanned
+  for the same vault name. If duplicates are found but one matches the previously connected
+  folder (cached folder ID), the user is warned via a toast but the matching folder is used.
+  If duplicates are found with no tiebreaker, the user gets a modal and the connection fails —
+  the user must remove the duplicate folder from Google Drive before retrying.
 
 - Feat: Make it easy to add a new device to group of devices already syncing same vault.
 - Plugin folder (`{configDir}/plugins/obsidian-air-sync`) is now included in the synced dot-paths by

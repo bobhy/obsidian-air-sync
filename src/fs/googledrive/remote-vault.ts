@@ -17,6 +17,12 @@ export interface RemoteVaultCallbacks {
 	 * dismisses the modal; the caller throws after awaiting it.
 	 */
 	promptDuplicateVaults?: (vaultName: string, count: number) => Promise<void>;
+	/**
+	 * Show a modal explaining that the local vault name does not match the
+	 * remote vault name. The returned promise resolves when the user dismisses
+	 * the modal; the caller throws after awaiting it.
+	 */
+	promptVaultNameMismatch?: (localName: string, remoteName: string) => Promise<void>;
 }
 
 /**
@@ -37,11 +43,12 @@ export async function resolveGDriveRemoteVault(
 	client: DriveClient,
 	vaultName: string,
 	cachedFolderId: string | undefined,
+	lastKnownVaultName?: string,
 	logger?: Logger,
 	callbacks?: RemoteVaultCallbacks,
 ): Promise<RemoteVaultResolution> {
 	if (cachedFolderId) {
-		return resolveLinked(client, cachedFolderId, vaultName, logger, callbacks);
+		return resolveLinked(client, cachedFolderId, vaultName, lastKnownVaultName, logger, callbacks);
 	}
 
 	// 2. Find or create the root "obsidian-air-sync" folder
@@ -56,6 +63,7 @@ async function resolveLinked(
 	client: DriveClient,
 	cachedFolderId: string,
 	vaultName: string,
+	lastKnownVaultName?: string,
 	logger?: Logger,
 	callbacks?: RemoteVaultCallbacks,
 ): Promise<RemoteVaultResolution> {
@@ -67,8 +75,39 @@ async function resolveLinked(
 		throw new Error(`Failed to access remote vault folder: ${msg}`);
 	}
 
-	// Update metadata.json if vault name changed
-	await updateMetadataIfNeeded(client, cachedFolderId, vaultName, logger);
+	// Read metadata once and use the result for both the mismatch check and the
+	// recreate-if-missing path, avoiding a redundant second Drive API round-trip.
+	const existingMetadata = await readMetadata(client, cachedFolderId);
+	if (existingMetadata) {
+		if (existingMetadata.vaultName !== vaultName) {
+			if (lastKnownVaultName && existingMetadata.vaultName === lastKnownVaultName) {
+				// The local vault was renamed via Obsidian vault manager — update Drive to match.
+				logger?.info("Local vault renamed; updating remote vault name", {
+					oldName: lastKnownVaultName,
+					newName: vaultName,
+					folderId: cachedFolderId,
+				});
+				await updateMetadataIfNeeded(client, cachedFolderId, vaultName, logger);
+			} else {
+				// Genuine mismatch: another device renamed the remote vault. Silently
+				// overwriting would break other devices' links, so fail and ask the user
+				// to rename locally to match.
+				logger?.error("Vault name mismatch: local name does not match remote vault name", {
+					localName: vaultName,
+					remoteName: existingMetadata.vaultName,
+					folderId: cachedFolderId,
+				});
+				await callbacks?.promptVaultNameMismatch?.(vaultName, existingMetadata.vaultName);
+				throw new Error(
+					`Local vault name "${vaultName}" does not match the Google Drive shared vault name ` +
+					`"${existingMetadata.vaultName}". Rename the local vault to match before connecting.`,
+				);
+			}
+		}
+	} else {
+		// Metadata is missing (e.g. accidentally deleted) — recreate it.
+		await updateMetadataIfNeeded(client, cachedFolderId, vaultName, logger);
+	}
 
 	// Warn if sibling duplicates exist (non-destructive: only looks, never creates)
 	const root = await client.findChildByName("root", REMOTE_VAULT_ROOT, FOLDER_MIME);
