@@ -14,7 +14,7 @@ export interface BackendManagerDeps {
 	getVaultName: () => string;
 	onConnected: (remoteFs: IFileSystem) => void;
 	onDisconnected: () => void;
-	onIdentityChanged: () => Promise<void>;
+	onSyncTargetChanged: () => Promise<void>;
 	notify: (message: string) => void;
 	refreshSettingsDisplay: () => void;
 	/** Returns true if this device has recorded sync history with the current remote vault. */
@@ -33,7 +33,9 @@ export interface BackendManagerDeps {
 export class BackendManager {
 	private remoteFs: IFileSystem | null = null;
 	private backendProvider: IBackendProvider | null = null;
-	private lastBackendIdentity: string | null = null;
+	private lastSyncTarget: string | null = null;
+	/** Identity captured just before a voluntary disconnect, for comparison on reconnect */
+	private syncTargetBeforeDisconnect: string | null = null;
 	private connecting = false;
 
 	constructor(private deps: BackendManagerDeps) {}
@@ -62,16 +64,16 @@ export class BackendManager {
 		this.backendProvider = provider;
 
 		try {
-			const newIdentity = provider.getIdentity(settings);
-			if (this.lastBackendIdentity !== null && newIdentity !== this.lastBackendIdentity) {
-				this.deps.getLogger().info("Backend identity changed", {
-					from: this.lastBackendIdentity,
-					to: newIdentity,
+			const newSyncTarget = provider.getSyncTarget(settings);
+			if (this.lastSyncTarget !== null && newSyncTarget !== this.lastSyncTarget) {
+				this.deps.getLogger().info("Sync target changed", {
+					from: this.lastSyncTarget,
+					to: newSyncTarget,
 				});
 				provider.resetTargetState?.(settings);
-				await this.deps.onIdentityChanged();
+				await this.deps.onSyncTargetChanged();
 			}
-			this.lastBackendIdentity = newIdentity;
+			this.lastSyncTarget = newSyncTarget;
 
 			this.remoteFs?.close?.()?.catch((e: unknown) => {
 				this.deps.getLogger().warn("Failed to close previous backend", { error: e instanceof Error ? e.message : String(e) });
@@ -181,6 +183,19 @@ export class BackendManager {
 				({ wasCreated } = await this.resolveRemoteVault(this.backendProvider, settings));
 			}
 
+			// Detect vault switch: if the user disconnected then reconnected to a different
+			// remote vault folder, clear sync state so stale prevSync records don't corrupt decisions.
+			const newSyncTarget = this.backendProvider.getSyncTarget(settings);
+			if (this.syncTargetBeforeDisconnect !== null && newSyncTarget !== this.syncTargetBeforeDisconnect) {
+				this.deps.getLogger().info("Sync target changed on reconnect", {
+					from: this.syncTargetBeforeDisconnect,
+					to: newSyncTarget,
+				});
+				await this.deps.onSyncTargetChanged();
+			}
+			this.syncTargetBeforeDisconnect = null;
+			this.lastSyncTarget = newSyncTarget;
+
 			this.remoteFs = this.backendProvider.createFs(
 				this.deps.getApp(),
 				settings,
@@ -272,12 +287,20 @@ export class BackendManager {
 
 		const settings = this.deps.getSettings();
 		const type = this.backendProvider.type;
+
+		// Remember the current sync target so completeBackendConnect can detect a vault switch.
+		this.syncTargetBeforeDisconnect = this.backendProvider.getSyncTarget(settings);
+
 		const resetData = await this.backendProvider.disconnect(settings);
 		settings.backendData[type] = resetData;
 		await this.deps.saveSettings();
 
-		await this.deps.onIdentityChanged();
-		this.lastBackendIdentity = null;
+		// Do NOT call onSyncTargetChanged here — disconnecting does not change the sync target.
+		// Sync state is preserved so that reconnecting the same vault hits Case B1
+		// ("resuming sync") rather than Case B3 (conflict modal).
+		// If the user reconnects to a different vault folder, completeBackendConnect detects
+		// the mismatch and calls onSyncTargetChanged at that point instead.
+		this.lastSyncTarget = null;
 
 		this.remoteFs = null;
 		this.deps.onDisconnected();

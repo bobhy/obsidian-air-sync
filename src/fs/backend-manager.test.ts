@@ -50,7 +50,7 @@ function createDeps(settings: AirSyncSettings, overrides: Partial<BackendManager
 		getVaultName: () => "Test Vault",
 		onConnected: vi.fn(),
 		onDisconnected: vi.fn(),
-		onIdentityChanged: vi.fn().mockResolvedValue(undefined),
+		onSyncTargetChanged: vi.fn().mockResolvedValue(undefined),
 		notify: vi.fn(),
 		refreshSettingsDisplay: vi.fn(),
 		hasSyncHistory: vi.fn().mockResolvedValue(false),
@@ -83,25 +83,25 @@ beforeEach(() => {
 		},
 		createFs: () => fakeFs,
 		isConnected: () => true,
-		getIdentity: () => "test:folder-A",
+		getSyncTarget: () => "test:folder-A",
 		resetTargetState: vi.fn(),
 		disconnect: vi.fn().mockResolvedValue({}),
 	};
 });
 
-describe("BackendManager — identity change triggers onIdentityChanged", () => {
-	it("does not call onIdentityChanged on first initBackend call", async () => {
+describe("BackendManager — sync target change triggers onSyncTargetChanged", () => {
+	it("does not call onSyncTargetChanged on first initBackend call", async () => {
 		const settings = mockSettings();
 		const deps = createDeps(settings);
 		const mgr = new BackendManager(deps);
 
 		await mgr.initBackend();
 
-		expect(deps.onIdentityChanged).not.toHaveBeenCalled();
+		expect(deps.onSyncTargetChanged).not.toHaveBeenCalled();
 		expect(deps.onConnected).toHaveBeenCalled();
 	});
 
-	it("calls onIdentityChanged when identity changes between initBackend calls", async () => {
+	it("calls onSyncTargetChanged when sync target changes between initBackend calls", async () => {
 		const settings = mockSettings();
 		const deps = createDeps(settings);
 		const mgr = new BackendManager(deps);
@@ -109,13 +109,13 @@ describe("BackendManager — identity change triggers onIdentityChanged", () => 
 		await mgr.initBackend(); // identity = "test:folder-A"
 
 		// Change identity
-		fakeProvider.getIdentity = () => "test:folder-B";
+		fakeProvider.getSyncTarget = () => "test:folder-B";
 		await mgr.initBackend();
 
-		expect(deps.onIdentityChanged).toHaveBeenCalledTimes(1);
+		expect(deps.onSyncTargetChanged).toHaveBeenCalledTimes(1);
 	});
 
-	it("does not call onIdentityChanged when identity stays the same", async () => {
+	it("does not call onSyncTargetChanged when sync target stays the same", async () => {
 		const settings = mockSettings();
 		const deps = createDeps(settings);
 		const mgr = new BackendManager(deps);
@@ -123,10 +123,10 @@ describe("BackendManager — identity change triggers onIdentityChanged", () => 
 		await mgr.initBackend();
 		await mgr.initBackend();
 
-		expect(deps.onIdentityChanged).not.toHaveBeenCalled();
+		expect(deps.onSyncTargetChanged).not.toHaveBeenCalled();
 	});
 
-	it("calls onIdentityChanged and resets identity on disconnect", async () => {
+	it("does NOT call onSyncTargetChanged on disconnect (sync state preserved for reconnect)", async () => {
 		const settings = mockSettings();
 		const deps = createDeps(settings);
 		const mgr = new BackendManager(deps);
@@ -134,13 +134,30 @@ describe("BackendManager — identity change triggers onIdentityChanged", () => 
 		await mgr.initBackend();
 		await mgr.disconnectBackend();
 
-		expect(deps.onIdentityChanged).toHaveBeenCalledTimes(1);
+		expect(deps.onSyncTargetChanged).not.toHaveBeenCalled();
 
-		// After disconnect, re-init should not trigger another callback
-		// (lastBackendIdentity was reset to null)
-		(deps.onIdentityChanged as ReturnType<typeof vi.fn>).mockClear();
+		// Re-init with same identity after disconnect should also not trigger callback
 		await mgr.initBackend();
-		expect(deps.onIdentityChanged).not.toHaveBeenCalled();
+		expect(deps.onSyncTargetChanged).not.toHaveBeenCalled();
+	});
+
+	it("calls onSyncTargetChanged via completeBackendConnect when vault folder switches after disconnect", async () => {
+		const settings = mockSettings();
+		const deps = createDeps(settings);
+		const mgr = new BackendManager(deps);
+
+		// initBackend establishes backendProvider and identity "test:folder-A"
+		await mgr.initBackend();
+		(deps.onSyncTargetChanged as ReturnType<typeof vi.fn>).mockClear();
+
+		await mgr.disconnectBackend();
+		expect(deps.onSyncTargetChanged).not.toHaveBeenCalled();
+
+		// Reconnect with a different vault folder — identity switches to "test:folder-B"
+		fakeProvider.getSyncTarget = () => "test:folder-B";
+		await mgr.completeBackendConnect("auth-code");
+
+		expect(deps.onSyncTargetChanged).toHaveBeenCalledTimes(1);
 	});
 
 	it("calls provider.resetTargetState on identity change", async () => {
@@ -157,7 +174,7 @@ describe("BackendManager — identity change triggers onIdentityChanged", () => 
 
 		await mgr.initBackend(); // identity = "test:folder-A"
 
-		fakeProvider.getIdentity = () => "test:folder-B";
+		fakeProvider.getSyncTarget = () => "test:folder-B";
 		await mgr.initBackend();
 
 		expect(resetSpy).toHaveBeenCalledTimes(1);

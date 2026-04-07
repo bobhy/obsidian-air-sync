@@ -192,7 +192,7 @@ export abstract class GoogleDriveProviderBase implements IBackendProvider {
 		return hasRefreshToken(this.secretStore, this.type) && !!this.getData(settings).remoteVaultFolderId;
 	}
 
-	getIdentity(settings: AirSyncSettings): string | null {
+	getSyncTarget(settings: AirSyncSettings): string | null {
 		const data = this.getData(settings);
 		if (!data.remoteVaultFolderId) return null;
 		return `${this.type}:${data.remoteVaultFolderId}`;
