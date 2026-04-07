@@ -25,7 +25,7 @@ export class Modal {
 	constructor(app: unknown) { this.app = app; }
 	open() {}
 	close() {}
-	get contentEl(): HTMLElement { return document.createElement("div"); }
+	get contentEl(): HTMLElement { return {} as unknown as HTMLElement; }
 }
 
 export class Setting {
@@ -193,7 +193,7 @@ export class PluginSettingTab {
 	app: unknown;
 	constructor(app: unknown, _plugin: unknown) { this.app = app; }
 	display() {}
-	get containerEl(): HTMLElement { return document.createElement("div"); }
+	get containerEl(): HTMLElement { return {} as unknown as HTMLElement; }
 }
 
 export interface PluginManifest {
@@ -219,7 +219,8 @@ export class Plugin {
 	async saveData(_data: unknown): Promise<void> {}
 	addSettingTab(_tab: unknown): void {}
 	addCommand(_cmd: unknown): void {}
-	addStatusBarItem(): HTMLElement { return document.createElement("div"); }
+	addRibbonIcon(_icon: string, _title: string, _callback: () => void): HTMLElement { return { setText: () => {} } as unknown as HTMLElement; }
+	addStatusBarItem(): HTMLElement { return { setText: () => {} } as unknown as HTMLElement; }
 	registerObsidianProtocolHandler(_scheme: string, _handler: unknown): void {}
 	registerEvent(_ref: unknown): void {}
 	register(_cb: () => void): void {}

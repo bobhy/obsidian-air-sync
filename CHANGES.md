@@ -26,6 +26,14 @@ and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0
   settings from the remote and proceeds.
 
 ### Fixed
+
+- Stale IDB sync records are now discarded on plugin reinstall, to avoid trashing `.airsync/metadata.json` in remote vault if local vault was empty.
+Previously, reinstalling the plugin
+  (which deletes `settings.json`) left orphaned sync records in IndexedDB. On the first sync after
+  reinstall, warm-mode change detection would see `.airsync/metadata.json` as locally deleted and
+  issue a `delete_remote`, trashing the remote vault identity file on Google Drive. The fix: if
+  `loadData()` returns null on startup, the orchestrator clears all sync records before the first
+  sync, forcing a safe cold scan.
 - `changesStartPageToken` removed from `settings.json` and `backendData`; the MetadataStore IndexedDB
   is now the sole authoritative store for this value.
 - OAuth PKCE state (`pendingAuthState`, `pendingCodeVerifier`) is no longer written to `settings.json`;

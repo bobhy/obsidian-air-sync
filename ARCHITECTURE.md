@@ -307,6 +307,22 @@ interface IAuthProvider {
 
 The provider registry (`fs/registry.ts`) maps backend types to provider instances. New backends register here; no changes needed elsewhere.
 
+## Startup safety: stale sync state
+
+`SyncStateStore` (IndexedDB, keyed by `vaultId`) survives plugin reinstalls because it is stored in
+the Obsidian application data directory, not in the plugin folder. `vaultId` itself is persisted in
+`InstanceStore` (a separate IDB database), also independent of `settings.json`.
+
+This creates a hazard: if the plugin folder is deleted (reinstall) while the local vault's
+`.airsync/` directory is also absent, the orphaned sync records would cause warm-mode change
+detection to classify `.airsync/metadata.json` as *locally deleted* and issue a `delete_remote` —
+trashing the Google Drive file that identifies the remote vault folder.
+
+**Guard:** `main.ts` detects a missing `settings.json` on startup (`loadData()` returning null) and
+calls `orchestrator.clearSyncState()` before the first sync runs. With no sync records the next sync
+is a cold scan, which compares actual file content and can never trigger `delete_remote` without a
+prior baseline.
+
 ## Detailed documentation
 
 - [Sync pipeline](docs/sync-pipeline.md) -- temperature modes, decision table, execution groups

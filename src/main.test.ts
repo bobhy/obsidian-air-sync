@@ -7,10 +7,33 @@ import AirSyncPlugin from "./main";
 vi.mock("./ui/settings", () => ({ AirSyncSettingTab: class {} }));
 vi.mock("./ui/join-conflict-modal", () => ({ JoinConflictModal: class {} }));
 vi.mock("./fs/local/index", () => ({ LocalFs: class {} }));
-vi.mock("./fs/backend-manager", () => ({ BackendManager: class {} }));
+vi.mock("./fs/backend-manager", () => ({
+	BackendManager: class {
+		initBackend = vi.fn().mockResolvedValue(undefined);
+		getRemoteFs = vi.fn().mockReturnValue(null);
+		getBackendProvider = vi.fn().mockReturnValue(null);
+		isConnecting = vi.fn().mockReturnValue(false);
+		close = vi.fn();
+		completeBackendConnect = vi.fn();
+	},
+}));
 vi.mock("./fs/registry", () => ({ initRegistry: vi.fn() }));
-vi.mock("./sync/orchestrator", () => ({ SyncOrchestrator: class {} }));
-vi.mock("./sync/scheduler", () => ({ SyncScheduler: class {} }));
+vi.mock("./sync/orchestrator", () => ({
+	SyncOrchestrator: class {
+		state = {};
+		isSyncing = vi.fn().mockReturnValue(false);
+		isExcluded = vi.fn().mockReturnValue(false);
+		hasSyncHistory = vi.fn().mockResolvedValue(false);
+		clearSyncState = vi.fn().mockResolvedValue(undefined);
+		close = vi.fn().mockResolvedValue(undefined);
+	},
+}));
+vi.mock("./sync/scheduler", () => ({
+	SyncScheduler: class {
+		start = vi.fn();
+		destroy = vi.fn();
+	},
+}));
 vi.mock("./sync/local-tracker", () => ({ LocalChangeTracker: class {} }));
 vi.mock("./logging/logger", () => ({
 	Logger: class { info = vi.fn(); warn = vi.fn(); error = vi.fn(); debug = vi.fn(); flush = vi.fn(); dispose = vi.fn(); },
@@ -57,6 +80,61 @@ function makePlugin(opts: { manifestDir?: string } = {}): {
 
 	return { plugin, manifest, roundtrip };
 }
+
+type OrchestratorSpy = { clearSyncState: ReturnType<typeof vi.fn> };
+
+/**
+ * Build a plugin suitable for testing the full onload() path.
+ * Wires up secretStorage (not in the base App mock) and unique vault name.
+ */
+function makeOnloadPlugin(): AirSyncPlugin {
+	const app = new App();
+	const uid = Math.random().toString(36).slice(2);
+	app.vault.getName = () => uid;
+	(app as unknown as { secretStorage: { getSecret: () => Promise<null>; setSecret: () => void } }).secretStorage = {
+		getSecret: () => Promise.resolve(null),
+		setSecret: () => {},
+	};
+
+	const manifest: PluginManifest = {
+		id: "air-sync",
+		name: "Air Sync",
+		version: "0.0.0",
+		minAppVersion: "1.11.4",
+		author: "test",
+		description: "test",
+		dir: `.plugins/test-plugin-${uid}`,
+	};
+
+	return new AirSyncPlugin(
+		app as unknown as Parameters<typeof AirSyncPlugin["prototype"]["loadData"]>[never],
+		manifest,
+	);
+}
+
+describe("AirSyncPlugin — reinstall detection", () => {
+	it("clears sync state when loadData returns null (reinstall scenario)", async () => {
+		const plugin = makeOnloadPlugin();
+		plugin.loadData = vi.fn().mockResolvedValue(null);
+		plugin.saveData = vi.fn().mockResolvedValue(undefined);
+
+		await plugin.onload();
+
+		const orchestrator = (plugin as unknown as { orchestrator: OrchestratorSpy }).orchestrator;
+		expect(orchestrator.clearSyncState).toHaveBeenCalledOnce();
+	});
+
+	it("does not clear sync state when loadData returns stored settings", async () => {
+		const plugin = makeOnloadPlugin();
+		plugin.loadData = vi.fn().mockResolvedValue({ syncDotPaths: [".templates"] });
+		plugin.saveData = vi.fn().mockResolvedValue(undefined);
+
+		await plugin.onload();
+
+		const orchestrator = (plugin as unknown as { orchestrator: OrchestratorSpy }).orchestrator;
+		expect(orchestrator.clearSyncState).not.toHaveBeenCalled();
+	});
+});
 
 describe("AirSyncPlugin — loadSettings / saveSettings", () => {
 	describe("syncDotPaths defaults", () => {

@@ -55,6 +55,8 @@ export default class AirSyncPlugin extends Plugin {
 	private localTracker!: LocalChangeTracker;
 	private settingTab: AirSyncSettingTab | null = null;
 	private logger!: Logger;
+	/** True when loadSettings() found no stored settings (fresh install or reinstall). */
+	private settingsWereAbsent = false;
 
 	async onload() {
 		await this.loadSettings();
@@ -145,6 +147,19 @@ export default class AirSyncPlugin extends Plugin {
 			register: (cb) => this.register(cb),
 		});
 
+		// If settings were absent on startup (fresh install or reinstall), stale IDB
+		// sync records may survive from a previous installation. Clear them now so the
+		// first sync performs a cold scan instead of incorrectly treating previously
+		// synced files as locally deleted.
+		if (this.settingsWereAbsent) {
+			this.logger.info(
+				"Settings not found on startup — stale sync records will be discarded",
+				{ reason: "reinstall_or_fresh_install" },
+			);
+			await this.orchestrator.clearSyncState();
+			this.logger.info("Stale sync records cleared — cold scan will be initiated on next sync");
+		}
+
 		this.settingTab = new AirSyncSettingTab(this.app, this);
 		this.addSettingTab(this.settingTab);
 
@@ -212,7 +227,9 @@ export default class AirSyncPlugin extends Plugin {
 	}
 
 	async loadSettings() {
-		const diskData = ((await this.loadData()) ?? {}) as Partial<AirSyncSettings>;
+		const rawDiskData: unknown = await this.loadData();
+		this.settingsWereAbsent = rawDiskData === null || rawDiskData === undefined;
+		const diskData = (rawDiskData ?? {}) as Partial<AirSyncSettings>;
 		const instanceData = await this.instanceStore.load(this.vaultKey);
 
 		// Bootstrap: if InstanceStore is empty (first run after upgrade to this version),
