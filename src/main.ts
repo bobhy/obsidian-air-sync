@@ -234,9 +234,10 @@ export default class AirSyncPlugin extends Plugin {
 		};
 
 		// Ensure the plugin folder is always included in syncDotPaths by default.
-		// Added here (not in DEFAULT_SETTINGS) because the path depends on configDir.
-		const pluginPath = `${this.app.vault.configDir}/plugins/obsidian-air-sync`;
-		if (!this.settings.syncDotPaths.includes(pluginPath)) {
+		// Added here (not in DEFAULT_SETTINGS) because the path depends on the
+		// actual install directory (this.manifest.dir), not a hardcoded name.
+		const pluginPath = this.manifest.dir;
+		if (pluginPath && !this.settings.syncDotPaths.includes(pluginPath)) {
 			this.settings.syncDotPaths = [pluginPath, ...this.settings.syncDotPaths];
 			await this.saveSettings();
 		}
