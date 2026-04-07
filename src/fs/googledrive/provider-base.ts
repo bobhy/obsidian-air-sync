@@ -12,6 +12,7 @@ import { DriveClient } from "./client";
 import { GoogleDriveFs } from "./index";
 import { MetadataStore } from "../../store/metadata-store";
 import { resolveGDriveRemoteVault } from "./remote-vault";
+import { DuplicateVaultModal } from "../../ui/duplicate-vault-modal";
 import type { DriveFile } from "./types";
 import type { GoogleDriveBackendData } from "./provider";
 import { storeTokens, readTokens, hasRefreshToken, clearTokens } from "../token-store";
@@ -234,7 +235,10 @@ export abstract class GoogleDriveProviderBase implements IBackendProvider {
 		googleAuth.setTokens(tokens.refreshToken, tokens.accessToken, data.accessTokenExpiry ?? 0);
 		const client = new DriveClient((force) => googleAuth.getAccessToken(force), logger);
 		const cachedFolderId = data.remoteVaultFolderId || undefined;
-		return resolveGDriveRemoteVault(client, vaultName, cachedFolderId, logger);
+		return resolveGDriveRemoteVault(client, vaultName, cachedFolderId, logger, {
+			notify: (message) => new Notice(message, 10_000),
+			promptDuplicateVaults: (name, count) => DuplicateVaultModal.prompt(app, name, count),
+		});
 	}
 
 	async disconnect(_settings: AirSyncSettings): Promise<Record<string, unknown>> {
