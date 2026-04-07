@@ -19,7 +19,7 @@ Sync should be invisible -- like air. When the user opens Obsidian, changes sinc
 ```
 src/
 ├── main.ts                          # Plugin entry point (lifecycle only)
-├── settings.ts                      # AirSyncSettings type & defaults
+├── settings.ts                      # AirSyncSettings type, defaults, SyncableSettings, toSyncable()
 ├── sync/
 │   ├── types.ts                     # SyncRecord, MixedEntity, SyncAction, SyncPlan, SafetyCheckResult
 │   ├── local-tracker.ts             # LocalChangeTracker — in-memory dirty path set
@@ -74,10 +74,12 @@ src/
 ├── ui/
 │   ├── settings.ts                  # AirSyncSettingTab — main settings UI
 │   ├── backend-settings.ts          # Backend connection settings section
-│   └── googledrive-settings.ts      # Google Drive specific settings
+│   ├── googledrive-settings.ts      # Google Drive specific settings
+│   └── join-conflict-modal.ts       # JoinConflictModal — prompt when local and remote both have unsynced content
 │
 ├── store/
 │   ├── idb-helper.ts                # IDBHelper — IndexedDB transaction wrapper
+│   ├── instance-store.ts            # InstanceStore — per-device settings (not synced)
 │   └── metadata-store.ts            # MetadataStore<T> — generic IDB-backed file metadata cache
 │
 ├── logging/
@@ -285,7 +287,7 @@ interface IBackendProvider {
   readonly auth: IAuthProvider;
   createFs(app, settings, logger?): IFileSystem | null;
   isConnected(settings): boolean;
-  getIdentity(settings): string | null;
+  getSyncTarget(settings): string | null;  // opaque key identifying the remote vault (e.g. Drive folder ID)
   resetTargetState?(settings): void;
   readBackendState?(fs): Record<string, unknown>;
   resolveRemoteVault?(app, settings, vaultName, logger?): Promise<RemoteVaultResolution>;
@@ -311,3 +313,4 @@ The provider registry (`fs/registry.ts`) maps backend types to provider instance
 - [Conflict resolution](docs/conflict-resolution.md) -- strategies, 3-way merge, conflict history
 - [Google Drive backend](docs/google-drive-backend.md) -- metadata cache, incremental sync, authentication
 - [Error handling](docs/error-handling.md) -- classification, retry, recovery scenarios
+- [Multi-device sync](docs/multi-device.md) -- settings split, group join flow, vault disambiguation, disconnect/reconnect

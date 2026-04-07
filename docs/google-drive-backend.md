@@ -113,7 +113,7 @@ Two OAuth implementations share a common base class (`GoogleAuthBase`):
 
 ### Token storage
 
-Tokens (`refreshToken`, `accessToken`) are stored in Obsidian's `SecretStorage` via `token-store.ts`, not in `settings.backendData`. Only `accessTokenExpiry` and `changesStartPageToken` are persisted in settings.
+Tokens (`refreshToken`, `accessToken`) are stored in Obsidian's `SecretStorage` via `token-store.ts`, not in `settings.backendData`. `accessTokenExpiry` is persisted in `InstanceStore` (per-device, not synced). `changesStartPageToken` is owned by `MetadataStore` (keyed by `remoteVaultFolderId`), also not in synced settings. Neither value appears in `settings.json`.
 
 ## Resumable upload
 
@@ -140,4 +140,4 @@ Tokens (`refreshToken`, `accessToken`) are stored in Obsidian's `SecretStorage` 
 - Requires `remoteVaultFolderId` to be set manually in settings
 - On disconnect, preserves custom credential references and folder ID
 
-Both extend `GoogleDriveProviderBase` which handles `createFs()`, `readBackendState()`, `resetTargetState()`, and `disconnect()`.
+Both extend `GoogleDriveProviderBase` which handles `createFs()`, `getSyncTarget()`, `readBackendState()`, `resetTargetState()`, and `disconnect()`. `getSyncTarget()` returns `"googledrive:{remoteVaultFolderId}"` — an opaque key identifying which remote vault folder this device is targeting, used by `BackendManager` to detect vault switches and clear stale sync state.
