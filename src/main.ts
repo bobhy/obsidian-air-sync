@@ -198,7 +198,17 @@ export default class AirSyncPlugin extends Plugin {
 	}
 
 	private get vaultKey(): string {
-		return vaultInstanceKey(this.app.vault.getName(), this.app.vault.configDir);
+		const vault = this.app.vault;
+		// FileSystemAdapter (desktop only) exposes getBasePath() — the absolute
+		// path to the vault root. This uniquely identifies the vault even when
+		// two vaults share the same name in the same Obsidian installation.
+		// On mobile the adapter doesn't have getBasePath(); fall back to name+configDir
+		// (acceptable because mobile Obsidian only opens one vault at a time).
+		const fsAdapter = vault.adapter as unknown as { getBasePath?: () => string };
+		const basePath = typeof fsAdapter.getBasePath === "function"
+			? fsAdapter.getBasePath()
+			: undefined;
+		return vaultInstanceKey(vault.getName(), vault.configDir, basePath);
 	}
 
 	async loadSettings() {

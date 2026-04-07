@@ -23,11 +23,14 @@ const STORE_NAME = "settings";
 
 /**
  * Compute the IDB record key for a given vault.
- * Uses vault name + configDir so the key survives vault path moves but stays
- * unique per vault when multiple vaults share the same Obsidian installation.
+ *
+ * On desktop, `basePath` (the absolute filesystem path from FileSystemAdapter.getBasePath())
+ * uniquely identifies the vault even when two vaults share the same name.
+ * On mobile there is only ever one active vault, so the name+configDir fallback is sufficient.
  */
-export function vaultInstanceKey(vaultName: string, configDir: string): string {
-	return sanitizeDbName(`${vaultName}_${configDir}`);
+export function vaultInstanceKey(vaultName: string, configDir: string, basePath?: string): string {
+	const discriminator = basePath ?? `${vaultName}_${configDir}`;
+	return sanitizeDbName(discriminator);
 }
 
 /**
