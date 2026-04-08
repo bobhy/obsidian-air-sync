@@ -108,7 +108,7 @@ export class AirSyncSettingTab extends PluginSettingTab {
 			)
 			.addTextArea((text) =>
 				text
-					.setPlaceholder(".templates\n.stversions")
+					.setPlaceholder(this.plugin.manifest.dir ?? `${this.app.vault.configDir}/plugins/your-plugin-id`)
 					.setValue(
 						this.plugin.settings.syncDotPaths.join("\n")
 					)

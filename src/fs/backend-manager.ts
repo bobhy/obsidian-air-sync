@@ -14,15 +14,28 @@ export interface BackendManagerDeps {
 	getVaultName: () => string;
 	onConnected: (remoteFs: IFileSystem) => void;
 	onDisconnected: () => void;
-	onIdentityChanged: () => Promise<void>;
+	onSyncTargetChanged: () => Promise<void>;
 	notify: (message: string) => void;
 	refreshSettingsDisplay: () => void;
+	/** Returns true if this device has recorded sync history with the current remote vault. */
+	hasSyncHistory: () => Promise<boolean>;
+	/** Returns true if the local vault has user content (non-dot files). */
+	localHasContentFiles: () => boolean;
+	/**
+	 * Reload plugin settings from disk (used after seeding settings from remote).
+	 * The caller is responsible for calling saveSettings() afterward if needed.
+	 */
+	reloadSettings: () => Promise<void>;
+	/** Prompt the user when local and remote both have content but have never been synced. */
+	promptJoinConflict: (vaultName: string) => Promise<"cancel" | "combine">;
 }
 
 export class BackendManager {
 	private remoteFs: IFileSystem | null = null;
 	private backendProvider: IBackendProvider | null = null;
-	private lastBackendIdentity: string | null = null;
+	private lastSyncTarget: string | null = null;
+	/** Identity captured just before a voluntary disconnect, for comparison on reconnect */
+	private syncTargetBeforeDisconnect: string | null = null;
 	private connecting = false;
 
 	constructor(private deps: BackendManagerDeps) {}
@@ -51,16 +64,16 @@ export class BackendManager {
 		this.backendProvider = provider;
 
 		try {
-			const newIdentity = provider.getIdentity(settings);
-			if (this.lastBackendIdentity !== null && newIdentity !== this.lastBackendIdentity) {
-				this.deps.getLogger().info("Backend identity changed", {
-					from: this.lastBackendIdentity,
-					to: newIdentity,
+			const newSyncTarget = provider.getSyncTarget(settings);
+			if (this.lastSyncTarget !== null && newSyncTarget !== this.lastSyncTarget) {
+				this.deps.getLogger().info("Sync target changed", {
+					from: this.lastSyncTarget,
+					to: newSyncTarget,
 				});
 				provider.resetTargetState?.(settings);
-				await this.deps.onIdentityChanged();
+				await this.deps.onSyncTargetChanged();
 			}
-			this.lastBackendIdentity = newIdentity;
+			this.lastSyncTarget = newSyncTarget;
 
 			this.remoteFs?.close?.()?.catch((e: unknown) => {
 				this.deps.getLogger().warn("Failed to close previous backend", { error: e instanceof Error ? e.message : String(e) });
@@ -99,7 +112,7 @@ export class BackendManager {
 	private async resolveRemoteVault(
 		provider: IBackendProvider,
 		settings: AirSyncSettings,
-	): Promise<void> {
+	): Promise<{ wasCreated: boolean }> {
 		const vaultName = this.deps.getVaultName();
 		const type = provider.type;
 		const backendData = settings.backendData[type] as Record<string, unknown> | undefined;
@@ -108,7 +121,7 @@ export class BackendManager {
 
 		// Skip network call if already linked and name unchanged
 		if (cachedFolderId && lastKnownName === vaultName) {
-			return;
+			return { wasCreated: false };
 		}
 
 		const result = await provider.resolveRemoteVault!(
@@ -116,6 +129,7 @@ export class BackendManager {
 		);
 		settings.backendData[type] = { ...(settings.backendData[type] ?? {}), ...result.backendUpdates };
 		await this.deps.saveSettings();
+		return { wasCreated: result.wasCreated };
 	}
 
 	/** Start the backend's auth/connection flow */
@@ -164,9 +178,23 @@ export class BackendManager {
 			await this.deps.saveSettings();
 
 			// Resolve remote vault before creating FS
+			let wasCreated = false;
 			if (this.backendProvider.resolveRemoteVault) {
-				await this.resolveRemoteVault(this.backendProvider, settings);
+				({ wasCreated } = await this.resolveRemoteVault(this.backendProvider, settings));
 			}
+
+			// Detect vault switch: if the user disconnected then reconnected to a different
+			// remote vault folder, clear sync state so stale prevSync records don't corrupt decisions.
+			const newSyncTarget = this.backendProvider.getSyncTarget(settings);
+			if (this.syncTargetBeforeDisconnect !== null && newSyncTarget !== this.syncTargetBeforeDisconnect) {
+				this.deps.getLogger().info("Sync target changed on reconnect", {
+					from: this.syncTargetBeforeDisconnect,
+					to: newSyncTarget,
+				});
+				await this.deps.onSyncTargetChanged();
+			}
+			this.syncTargetBeforeDisconnect = null;
+			this.lastSyncTarget = newSyncTarget;
 
 			this.remoteFs = this.backendProvider.createFs(
 				this.deps.getApp(),
@@ -177,9 +205,7 @@ export class BackendManager {
 				this.deps.onConnected(this.remoteFs);
 			}
 
-			this.deps.notify(
-				`Connected to ${this.backendProvider.displayName}`
-			);
+			await this.handleInitialConnect(wasCreated, this.deps.getVaultName());
 		} catch (err) {
 			const msg = err instanceof Error ? err.message : String(err);
 			this.deps.getLogger().error("Authorization failed", { message: msg });
@@ -191,18 +217,90 @@ export class BackendManager {
 		this.deps.refreshSettingsDisplay();
 	}
 
+	/**
+	 * Show the appropriate toast (or modal) for the initial-connect scenarios:
+	 *
+	 * - wasCreated=true   → Case A: no group existed; we just created one
+	 * - wasCreated=false, hasSyncHistory=true  → Case B1: rejoining a known group
+	 * - wasCreated=false, hasSyncHistory=false, localEmpty   → Case B2: fresh join; seed settings
+	 * - wasCreated=false, hasSyncHistory=false, localNotEmpty → Case B3: conflict prompt
+	 */
+	private async handleInitialConnect(wasCreated: boolean, vaultName: string): Promise<void> {
+		if (wasCreated) {
+			// Case A: brand new sync group
+			this.deps.notify(`No existing group for vault "${vaultName}" found in cloud storage — creating one`);
+			return;
+		}
+
+		const syncHistory = await this.deps.hasSyncHistory();
+		if (syncHistory) {
+			// Case B1: this device previously synced with the group
+			this.deps.notify(`Resuming sync with group vault "${vaultName}"`);
+			return;
+		}
+
+		const localEmpty = !this.deps.localHasContentFiles();
+		if (localEmpty) {
+			// Case B2: fresh device joining existing group — seed settings from remote
+			this.deps.notify(`Downloading group vault "${vaultName}" and syncing`);
+			await this.seedGroupSettings();
+			return;
+		}
+
+		// Case B3: local has content but no sync history — ask the user
+		const choice = await this.deps.promptJoinConflict(vaultName);
+		if (choice === "cancel") {
+			// Disconnect — roll back the connection
+			await this.disconnectBackend();
+		}
+		// "combine": proceed with current sync; remote settings already seeded below
+		if (choice === "combine") {
+			await this.seedGroupSettings();
+		}
+	}
+
+	/**
+	 * Download the plugin's data.json from the remote vault and reload settings.
+	 * This seeds the local device with the group's shared settings.
+	 */
+	private async seedGroupSettings(): Promise<void> {
+		if (!this.remoteFs) return;
+
+		const app = this.deps.getApp();
+		const remotePath = `${app.vault.configDir}/plugins/obsidian-air-sync/data.json`;
+
+		try {
+			const content = await this.remoteFs.read(remotePath);
+			await app.vault.adapter.writeBinary(remotePath, content);
+			await this.deps.reloadSettings();
+			this.deps.getLogger().info("Seeded group settings from remote", { path: remotePath });
+		} catch (err) {
+			// Remote settings don't exist yet — not an error, just skip
+			const msg = err instanceof Error ? err.message : String(err);
+			this.deps.getLogger().debug("No remote settings to seed", { message: msg });
+		}
+	}
+
 	/** Disconnect the current backend */
 	async disconnectBackend(): Promise<void> {
 		if (!this.backendProvider) return;
 
 		const settings = this.deps.getSettings();
 		const type = this.backendProvider.type;
+
+		// Remember the current sync target so completeBackendConnect can detect a vault switch.
+		this.syncTargetBeforeDisconnect = this.backendProvider.getSyncTarget(settings);
+
 		const resetData = await this.backendProvider.disconnect(settings);
 		settings.backendData[type] = resetData;
 		await this.deps.saveSettings();
 
-		await this.deps.onIdentityChanged();
-		this.lastBackendIdentity = null;
+		// Do NOT call onSyncTargetChanged here — disconnecting does not change the sync target.
+		// Sync state is preserved so that reconnecting the same vault hits Case B1
+		// ("resuming sync") rather than Case B3 (conflict modal).
+		// If the user reconnects to a different vault folder, completeBackendConnect detects
+		// the mismatch and calls onSyncTargetChanged at that point instead.
+		this.lastSyncTarget = null;
 
 		this.remoteFs = null;
 		this.deps.onDisconnected();

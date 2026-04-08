@@ -10,17 +10,16 @@ import { GoogleDriveAuthProviderBase, GoogleDriveProviderBase } from "./provider
 export interface GoogleDriveBackendData {
 	remoteVaultFolderId: string;
 	lastKnownVaultName: string;
-	accessTokenExpiry: number;
-	changesStartPageToken: string;
-	pendingAuthState: string;
+	/**
+	 * Loaded from InstanceStore at startup, not persisted to settings.json.
+	 * Optional because it may be absent on the first sync after a fresh install.
+	 */
+	accessTokenExpiry?: number;
 }
 
 const DEFAULT_GDRIVE_DATA: GoogleDriveBackendData = {
 	remoteVaultFolderId: "",
 	lastKnownVaultName: "",
-	accessTokenExpiry: 0,
-	changesStartPageToken: "",
-	pendingAuthState: "",
 };
 
 /** Type-safe accessor for Google Drive backend data */

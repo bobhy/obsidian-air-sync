@@ -228,32 +228,6 @@ describe("GoogleAuth.getAccessToken concurrency", () => {
 });
 
 describe("GoogleDriveProvider.completeAuth", () => {
-	it("restores CSRF state on existing auth that lacks it", async () => {
-		const { GoogleDriveProvider } = await import("./provider");
-		const { GoogleAuth } = await import("./auth");
-		const secretStore = createMockSecretStore();
-		const provider = new GoogleDriveProvider(secretStore);
-		const authInternal = provider.auth as unknown as GoogleDriveAuthProviderInternal;
-
-		const backendData = {
-			pendingAuthState: "saved-state",
-		};
-
-		authInternal.googleAuth = new GoogleAuth();
-		expect(authInternal.googleAuth.getAuthState()).toBeNull();
-
-		const result = await provider.auth.completeAuth(
-			"https://callback?access_token=new-access&refresh_token=new-refresh&expires_in=3600&state=saved-state",
-			backendData,
-		);
-
-		// Tokens are stored in SecretStorage, not returned in the result
-		expect(result.refreshToken).toBeUndefined();
-		expect(secretStore.getSecret("air-sync-googledrive-refresh-token")).toBe("new-refresh");
-		expect(result.accessTokenExpiry).toBeGreaterThan(0);
-		expect(authInternal.googleAuth.getAuthState()).toBeNull();
-	});
-
 	it("rejects empty callback", async () => {
 		const { GoogleDriveProvider } = await import("./provider");
 		const secretStore = createMockSecretStore();
@@ -276,13 +250,7 @@ describe("GoogleDriveAuthProvider.getOrCreateGoogleAuth", () => {
 		const existingAuth = new GoogleAuth();
 		authInternal.googleAuth = existingAuth;
 
-		const data = {
-			accessTokenExpiry: 0,
-			remoteVaultFolderId: "folder",
-			lastKnownVaultName: "",
-			changesStartPageToken: "",
-			pendingAuthState: "",
-		};
+		const data = { remoteVaultFolderId: "folder", lastKnownVaultName: "" };
 
 		const auth = provider.auth.getOrCreateGoogleAuth(data);
 		expect(auth).toBe(existingAuth);
@@ -293,13 +261,7 @@ describe("GoogleDriveAuthProvider.getOrCreateGoogleAuth", () => {
 		const secretStore = createMockSecretStore();
 		const provider = new GoogleDriveProvider(secretStore);
 
-		const data = {
-			accessTokenExpiry: 0,
-			remoteVaultFolderId: "folder",
-			lastKnownVaultName: "",
-			changesStartPageToken: "",
-			pendingAuthState: "",
-		};
+		const data = { remoteVaultFolderId: "folder", lastKnownVaultName: "" };
 
 		const auth = provider.auth.getOrCreateGoogleAuth(data);
 		expect(auth).toBeDefined();
@@ -570,39 +532,4 @@ describe("GoogleDriveCustomProvider.completeAuth", () => {
 		mockRequestUrl.mockRestore();
 	});
 
-	it("restores code verifier from backendData on plugin reload", async () => {
-		const mockRequestUrl = (await spyRequestUrl()).mockResolvedValue(
-			mockRes({
-				access_token: "access",
-				refresh_token: "refresh",
-				expires_in: 3600,
-				token_type: "Bearer",
-			})
-		);
-
-		const { GoogleDriveCustomProvider } = await import("./provider-custom");
-		const secretStore = createMockSecretStore({ cid: "cid-value", csecret: "csecret-value" });
-		const provider = new GoogleDriveCustomProvider(secretStore);
-
-		// Simulate plugin reload: no in-memory auth, but backendData has persisted state
-		const result = await provider.auth.completeAuth(
-			"https://callback?code=code&state=persisted-state",
-			{
-				customClientId: "cid",
-				customClientSecret: "csecret",
-				pendingAuthState: "persisted-state",
-				pendingCodeVerifier: "persisted-verifier",
-			},
-		);
-
-		// Tokens stored in SecretStorage
-		expect(result.refreshToken).toBeUndefined();
-		expect(secretStore.getSecret("air-sync-googledrive-custom-refresh-token")).toBe("refresh");
-		const callBody = mockRequestUrl.mock.calls[0]?.[0];
-		const body = typeof callBody === "object" && callBody !== null && "body" in callBody
-			? (callBody as { body: string }).body : "";
-		expect(body).toContain("code_verifier=persisted-verifier");
-
-		mockRequestUrl.mockRestore();
-	});
 });

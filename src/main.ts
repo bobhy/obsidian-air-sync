@@ -1,6 +1,8 @@
 import { Notice, Platform, Plugin } from "obsidian";
-import { DEFAULT_SETTINGS, AirSyncSettings } from "./settings";
+import { DEFAULT_SETTINGS, AirSyncSettings, toSyncable } from "./settings";
+import { InstanceStore, InstanceSettings, DEFAULT_INSTANCE_SETTINGS, vaultInstanceKey } from "./store/instance-store";
 import { AirSyncSettingTab } from "./ui/settings";
+import { JoinConflictModal } from "./ui/join-conflict-modal";
 import { LocalFs } from "./fs/local/index";
 import { BackendManager } from "./fs/backend-manager";
 import { initRegistry } from "./fs/registry";
@@ -12,8 +14,38 @@ import { LocalChangeTracker } from "./sync/local-tracker";
 import { Logger, getDeviceName } from "./logging/logger";
 import type { LoggerAdapter } from "./logging/logger";
 
+function extractInstance(settings: AirSyncSettings): InstanceSettings {
+	const backendInstance: Record<string, { accessTokenExpiry: number }> = {};
+	for (const [type, data] of Object.entries(settings.backendData)) {
+		if (typeof data.accessTokenExpiry === "number") {
+			backendInstance[type] = { accessTokenExpiry: data.accessTokenExpiry };
+		}
+	}
+	return {
+		vaultId: settings.vaultId,
+		enableLogging: settings.enableLogging,
+		logLevel: settings.logLevel,
+		backendInstance,
+	};
+}
+
+function mergeBackendInstance(
+	backendData: Record<string, Record<string, unknown>>,
+	backendInstance: Record<string, { accessTokenExpiry: number }>,
+): Record<string, Record<string, unknown>> {
+	const result: Record<string, Record<string, unknown>> = {};
+	for (const [type, data] of Object.entries(backendData)) {
+		result[type] = { ...data };
+	}
+	for (const [type, inst] of Object.entries(backendInstance)) {
+		result[type] = { ...(result[type] ?? {}), ...inst };
+	}
+	return result;
+}
+
 export default class AirSyncPlugin extends Plugin {
 	settings!: AirSyncSettings;
+	private instanceStore: InstanceStore = new InstanceStore();
 	private localFs: LocalFs | null = null;
 	backendManager!: BackendManager;
 	private statusBarEl: HTMLElement | null = null;
@@ -23,6 +55,8 @@ export default class AirSyncPlugin extends Plugin {
 	private localTracker!: LocalChangeTracker;
 	private settingTab: AirSyncSettingTab | null = null;
 	private logger!: Logger;
+	/** True when loadSettings() found no stored settings (fresh install or reinstall). */
+	private settingsWereAbsent = false;
 
 	async onload() {
 		await this.loadSettings();
@@ -57,7 +91,7 @@ export default class AirSyncPlugin extends Plugin {
 				this.syncStatus = "not_connected";
 				this.updateStatusBar();
 			},
-			onIdentityChanged: async () => {
+			onSyncTargetChanged: async () => {
 				await this.orchestrator?.clearSyncState();
 			},
 			notify: (message) => {
@@ -66,6 +100,14 @@ export default class AirSyncPlugin extends Plugin {
 			refreshSettingsDisplay: () => {
 				this.settingTab?.display();
 			},
+			hasSyncHistory: () =>
+				this.orchestrator
+					? this.orchestrator.hasSyncHistory()
+					: Promise.resolve(false),
+			localHasContentFiles: () => this.localFs?.hasContentFiles() ?? false,
+			reloadSettings: () => this.loadSettings(),
+			promptJoinConflict: (vaultName) =>
+				JoinConflictModal.prompt(this.app, vaultName),
 		});
 
 		this.localTracker = new LocalChangeTracker();
@@ -104,6 +146,19 @@ export default class AirSyncPlugin extends Plugin {
 			registerEvent: (ref) => this.registerEvent(ref),
 			register: (cb) => this.register(cb),
 		});
+
+		// If settings were absent on startup (fresh install or reinstall), stale IDB
+		// sync records may survive from a previous installation. Clear them now so the
+		// first sync performs a cold scan instead of incorrectly treating previously
+		// synced files as locally deleted.
+		if (this.settingsWereAbsent) {
+			this.logger.info(
+				"Settings not found on startup — stale sync records will be discarded",
+				{ reason: "reinstall_or_fresh_install" },
+			);
+			await this.orchestrator.clearSyncState();
+			this.logger.info("Stale sync records cleared — cold scan will be initiated on next sync");
+		}
 
 		this.settingTab = new AirSyncSettingTab(this.app, this);
 		this.addSettingTab(this.settingTab);
@@ -154,30 +209,70 @@ export default class AirSyncPlugin extends Plugin {
 		this.orchestrator.close().catch((e) => {
 			this.logger.error("Failed to close orchestrator", { message: e instanceof Error ? e.message : String(e) });
 		});
+		this.instanceStore.close().catch(() => {});
+	}
+
+	private get vaultKey(): string {
+		const vault = this.app.vault;
+		// FileSystemAdapter (desktop only) exposes getBasePath() — the absolute
+		// path to the vault root. This uniquely identifies the vault even when
+		// two vaults share the same name in the same Obsidian installation.
+		// On mobile the adapter doesn't have getBasePath(); fall back to name+configDir
+		// (acceptable because mobile Obsidian only opens one vault at a time).
+		const fsAdapter = vault.adapter as unknown as { getBasePath?: () => string };
+		const basePath = typeof fsAdapter.getBasePath === "function"
+			? fsAdapter.getBasePath()
+			: undefined;
+		return vaultInstanceKey(vault.getName(), vault.configDir, basePath);
 	}
 
 	async loadSettings() {
-		this.settings = Object.assign(
-			{},
-			DEFAULT_SETTINGS,
-			(await this.loadData()) as Partial<AirSyncSettings>,
-		);
+		const rawDiskData: unknown = await this.loadData();
+		this.settingsWereAbsent = rawDiskData === null || rawDiskData === undefined;
+		const diskData = (rawDiskData ?? {}) as Partial<AirSyncSettings>;
+		const instanceData = await this.instanceStore.load(this.vaultKey);
 
-		let needsSave = false;
-
-		// Generate a stable vault ID on first load
-		if (!this.settings.vaultId) {
-			this.settings.vaultId = crypto.randomUUID();
-			needsSave = true;
+		// Bootstrap: if InstanceStore is empty (first run after upgrade to this version),
+		// carry over instance fields from settings.json to avoid losing user preferences
+		// and to preserve vaultId so the MetadataStore cache key stays valid.
+		if (!instanceData.vaultId) {
+			instanceData.vaultId = diskData.vaultId || crypto.randomUUID();
+			instanceData.enableLogging = diskData.enableLogging ?? DEFAULT_INSTANCE_SETTINGS.enableLogging;
+			instanceData.logLevel = diskData.logLevel ?? DEFAULT_INSTANCE_SETTINGS.logLevel;
+			for (const [type, data] of Object.entries(diskData.backendData ?? {})) {
+				if (typeof data.accessTokenExpiry === "number") {
+					instanceData.backendInstance[type] = { accessTokenExpiry: data.accessTokenExpiry };
+				}
+			}
+			await this.instanceStore.save(this.vaultKey, instanceData);
 		}
 
-		if (needsSave) {
-			await this.saveData(this.settings);
+		this.settings = {
+			...DEFAULT_SETTINGS,
+			...diskData,
+			// Instance fields always win over anything in settings.json
+			vaultId: instanceData.vaultId,
+			enableLogging: instanceData.enableLogging,
+			logLevel: instanceData.logLevel,
+			backendData: mergeBackendInstance(
+				diskData.backendData ?? {},
+				instanceData.backendInstance,
+			),
+		};
+
+		// Ensure the plugin folder is always included in syncDotPaths by default.
+		// Added here (not in DEFAULT_SETTINGS) because the path depends on the
+		// actual install directory (this.manifest.dir), not a hardcoded name.
+		const pluginPath = this.manifest.dir;
+		if (pluginPath && !this.settings.syncDotPaths.includes(pluginPath)) {
+			this.settings.syncDotPaths = [pluginPath, ...this.settings.syncDotPaths];
+			await this.saveSettings();
 		}
 	}
 
 	async saveSettings() {
-		await this.saveData(this.settings);
+		await this.saveData(toSyncable(this.settings));
+		await this.instanceStore.save(this.vaultKey, extractInstance(this.settings));
 	}
 
 	async runSync(): Promise<void> {

@@ -27,8 +27,12 @@ export interface IBackendProvider {
 	/** Whether credentials are present and the backend is ready to sync */
 	isConnected(settings: AirSyncSettings): boolean;
 
-	/** Return a string uniquely identifying the current remote target (e.g. folder ID) */
-	getIdentity(settings: AirSyncSettings): string | null;
+	/**
+	 * Return an opaque key identifying the remote vault this backend is targeting
+	 * (e.g. the Drive folder ID). Used to detect when the sync target has changed
+	 * so stale prevSync records can be cleared. Returns null if not yet connected.
+	 */
+	getSyncTarget(settings: AirSyncSettings): string | null;
 
 	/**
 	 * Called when the backend identity changes (e.g. user switches to a different folder).

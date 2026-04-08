@@ -10,4 +10,6 @@ export interface RemoteVaultMetadata {
 export interface RemoteVaultResolution {
 	/** Backend-specific data to persist in settings.backendData (e.g., remoteVaultFolderId, lastKnownVaultName) */
 	backendUpdates: Record<string, unknown>;
+	/** True if the remote vault was just created (first-time setup); false if it already existed */
+	wasCreated: boolean;
 }

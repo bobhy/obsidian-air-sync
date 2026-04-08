@@ -63,7 +63,7 @@ src/
 │   │   ├── metadata-cache.ts        # DriveMetadataCache — path<->ID mapping
 │   │   ├── incremental-sync.ts      # applyIncrementalChanges() — changes.list integration
 │   │   ├── resumable-upload.ts      # ResumableUploader — large file upload (>5 MB)
-│   │   ├── remote-vault.ts          # resolveGDriveRemoteVault() — vault folder resolution
+│   │   ├── remote-vault.ts          # resolveGDriveRemoteVault() — vault folder resolution + duplicate detection
 │   │   ├── provider-base.ts         # GoogleDriveProviderBase, GoogleDriveAuthProviderBase
 │   │   ├── provider.ts              # GoogleDriveProvider (built-in OAuth)
 │   │   ├── provider-custom.ts       # GoogleDriveCustomProvider (user-provided credentials)
@@ -74,10 +74,12 @@ src/
 ├── ui/
 │   ├── settings.ts                  # AirSyncSettingTab — main settings UI
 │   ├── backend-settings.ts          # Backend connection settings section
-│   └── googledrive-settings.ts      # Google Drive specific settings
+│   ├── googledrive-settings.ts      # Google Drive specific settings
+│   └── join-conflict-modal.ts       # JoinConflictModal — prompt when local and remote both have unsynced content
 │
 ├── store/
 │   ├── idb-helper.ts                # IDBHelper — IndexedDB transaction wrapper
+│   ├── instance-store.ts            # InstanceStore — per-device settings (not synced)
 │   └── metadata-store.ts            # MetadataStore<T> — generic IDB-backed file metadata cache
 │
 ├── logging/
@@ -294,7 +296,7 @@ interface IBackendProvider {
   readonly auth: IAuthProvider;
   createFs(app, settings, logger?): IFileSystem | null;
   isConnected(settings): boolean;
-  getIdentity(settings): string | null;
+  getSyncTarget(settings): string | null;  // opaque key identifying the remote vault (e.g. Drive folder ID)
   resetTargetState?(settings): void;
   readBackendState?(fs): Record<string, unknown>;
   resolveRemoteVault?(app, settings, vaultName, logger?): Promise<RemoteVaultResolution>;
@@ -314,9 +316,57 @@ interface IAuthProvider {
 
 The provider registry (`fs/registry.ts`) maps backend types to provider instances. New backends register here; no changes needed elsewhere.
 
+## Remote vault folder resolution
+
+`resolveGDriveRemoteVault()` (`fs/googledrive/remote-vault.ts`) is called once per connection
+attempt by the backend provider. It locates (or creates) the vault's UUID folder under
+`obsidian-air-sync/` in Google Drive and returns its folder ID for use by `GoogleDriveFs`.
+
+**Fast path (cached folder ID known):** `getFile` verifies the cached folder is still accessible,
+then `readMetadata` reads `.airsync/metadata.json` once:
+
+- If metadata exists and the vault name matches → proceed (no write).
+- If metadata exists but the vault name differs → `VaultNameMismatchModal` explains the situation
+  and the connection fails. The user must rename the local vault to match the remote name before
+  retrying. (This guards against one device renaming the vault while others still have the old name
+  cached.)
+- If metadata is missing → `updateMetadataIfNeeded` recreates it.
+
+A non-destructive sibling scan then checks for duplicate vault folders with the same name and fires
+a toast warning if any are found. The cached folder is always used regardless.
+
+**Fresh connect (no cached folder ID):** All sibling UUID folders under the root are scanned and
+their `metadata.json` files read to collect every folder that claims the same vault name:
+
+- 0 matches → a new UUID folder is created with a fresh `metadata.json`.
+- 1 match → that folder is used.
+- 2+ matches → a `DuplicateVaultModal` explains the situation and the connection fails. The user
+  must remove the extra folder(s) in Google Drive before retrying.
+
+The `RemoteVaultCallbacks` interface decouples the resolution logic from UI: callers provide
+`notify` (toast), `promptDuplicateVaults`, and `promptVaultNameMismatch` (modal) callbacks; tests
+omit them to get plain error throws.
+
+## Startup safety: stale sync state
+
+`SyncStateStore` (IndexedDB, keyed by `vaultId`) survives plugin reinstalls because it is stored in
+the Obsidian application data directory, not in the plugin folder. `vaultId` itself is persisted in
+`InstanceStore` (a separate IDB database), also independent of `settings.json`.
+
+This creates a hazard: if the plugin folder is deleted (reinstall) while the local vault's
+`.airsync/` directory is also absent, the orphaned sync records would cause warm-mode change
+detection to classify `.airsync/metadata.json` as *locally deleted* and issue a `delete_remote` —
+trashing the Google Drive file that identifies the remote vault folder.
+
+**Guard:** `main.ts` detects a missing `settings.json` on startup (`loadData()` returning null) and
+calls `orchestrator.clearSyncState()` before the first sync runs. With no sync records the next sync
+is a cold scan, which compares actual file content and can never trigger `delete_remote` without a
+prior baseline.
+
 ## Detailed documentation
 
 - [Sync pipeline](docs/sync-pipeline.md) -- temperature modes, decision table, execution groups
 - [Conflict resolution](docs/conflict-resolution.md) -- strategies, 3-way merge, conflict history
 - [Google Drive backend](docs/google-drive-backend.md) -- metadata cache, incremental sync, authentication
 - [Error handling](docs/error-handling.md) -- classification, retry, recovery scenarios
+- [Multi-device sync](docs/multi-device.md) -- settings split, group join flow, vault disambiguation, disconnect/reconnect

@@ -97,6 +97,12 @@ export class SyncOrchestrator {
 		await this.stateStore.clear();
 	}
 
+	/** True if this device has any recorded sync history with the current remote vault. */
+	async hasSyncHistory(): Promise<boolean> {
+		const records = await this.stateStore.getAll();
+		return records.length > 0;
+	}
+
 	shouldSync(): boolean {
 		const hasRemote = !!this.deps.remoteFs();
 		const isLocked = this.syncMutex.isLocked;

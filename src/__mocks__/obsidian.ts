@@ -25,7 +25,7 @@ export class Modal {
 	constructor(app: unknown) { this.app = app; }
 	open() {}
 	close() {}
-	get contentEl(): HTMLElement { return document.createElement("div"); }
+	get contentEl(): HTMLElement { return {} as unknown as HTMLElement; }
 }
 
 export class Setting {
@@ -65,6 +65,7 @@ export class TFolder {
 
 /** In-memory Vault mock for unit tests */
 export class Vault {
+	configDir = ".obsidian"; // eslint-disable-line obsidianmd/hardcoded-config-path -- test mock only; real code uses app.vault.configDir
 	private files = new Map<string, { type: "file" | "folder"; content?: ArrayBuffer; mtime?: number }>();
 	adapter = {
 		exists: async (path: string): Promise<boolean> => {
@@ -192,5 +193,35 @@ export class PluginSettingTab {
 	app: unknown;
 	constructor(app: unknown, _plugin: unknown) { this.app = app; }
 	display() {}
-	get containerEl(): HTMLElement { return document.createElement("div"); }
+	get containerEl(): HTMLElement { return {} as unknown as HTMLElement; }
+}
+
+export interface PluginManifest {
+	id: string;
+	name: string;
+	version: string;
+	minAppVersion: string;
+	author: string;
+	description: string;
+	dir?: string;
+}
+
+export class Plugin {
+	app: App;
+	manifest: PluginManifest;
+
+	constructor(app: App, manifest: PluginManifest) {
+		this.app = app;
+		this.manifest = manifest;
+	}
+
+	async loadData(): Promise<unknown> { return null; }
+	async saveData(_data: unknown): Promise<void> {}
+	addSettingTab(_tab: unknown): void {}
+	addCommand(_cmd: unknown): void {}
+	addRibbonIcon(_icon: string, _title: string, _callback: () => void): HTMLElement { return { setText: () => {} } as unknown as HTMLElement; }
+	addStatusBarItem(): HTMLElement { return { setText: () => {} } as unknown as HTMLElement; }
+	registerObsidianProtocolHandler(_scheme: string, _handler: unknown): void {}
+	registerEvent(_ref: unknown): void {}
+	register(_cb: () => void): void {}
 }

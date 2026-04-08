@@ -38,5 +38,32 @@ export const DEFAULT_SETTINGS: AirSyncSettings = {
 	backendData: {},
 };
 
+/**
+ * The subset of AirSyncSettings written to settings.json (and thus synced across devices).
+ * AirSyncSettings serves as the single in-memory runtime type to avoid touching every
+ * call site; SyncableSettings is only used at the persistence boundary (saveData).
+ */
+export type SyncableSettings = Omit<AirSyncSettings, "vaultId" | "enableLogging" | "logLevel">;
 
+/** Backend fields that are per-device — stripped from backendData before writing to settings.json */
+const INSTANCE_BACKEND_KEYS = [
+	"accessTokenExpiry",
+	"changesStartPageToken", // legacy: removed from backendData, kept here to clean up old values
+	"pendingAuthState",      // legacy: removed from backendData, kept here to clean up old values
+	"pendingCodeVerifier",   // legacy: removed from backendData, kept here to clean up old values
+] as const;
+
+/** Return a copy of settings with instance-specific fields removed, safe to write to settings.json */
+export function toSyncable(settings: AirSyncSettings): SyncableSettings {
+	const backendData: Record<string, Record<string, unknown>> = {};
+	for (const [type, data] of Object.entries(settings.backendData)) {
+		const cleaned = { ...data };
+		for (const key of INSTANCE_BACKEND_KEYS) {
+			delete cleaned[key];
+		}
+		backendData[type] = cleaned;
+	}
+	// Spread all settings then override backendData; the return type drops instance-only keys
+	return { ...settings, backendData } as unknown as SyncableSettings;
+}
 

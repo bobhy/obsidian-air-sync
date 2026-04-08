@@ -14,6 +14,13 @@ and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0
 - `.airsync` (the sync-state folder) is no longer synced by default. Users who want it
   synced can add `.airsync` to the *Dot paths to sync* list. 
 
+- Check for duplicate remote vaults on connect.
+  When connecting to Google Drive, all vault folders under `obsidian-air-sync/` are scanned
+  for the same vault name. If duplicates are found but one matches the previously connected
+  folder (cached folder ID), the user is warned but the matching remote vault is used.
+  If duplicates are found but none matches cached ID, the user gets an error and the connection fails —
+  the user must manually remove the duplicate vault folder from Google Drive before retrying.
+
 ### Added
 - New conflict strategy **Auto merge (optimized)** (`auto_merge_optimize`): uses `diff3Merge`
   for conflict rendering so that conflict markers span only the lines that actually differ.
@@ -21,6 +28,47 @@ and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0
   conflict style. Multiple independent conflict sites each get their own marker block.
   Clean-merge detection still uses the `diffIndices`-based path to avoid false conflicts on
   non-overlapping nearby changes.
+
+- Feat: Handle rename of shared remote vault (imperfectly).
+  Because Obsidian doesn't notify plugin when vault is renamed by Obsidian vault manager...
+  For now: when multiple devices sync to same remote vault:
+  1. on one device, rename the vault via Obsidian vault manager, then *restart* Obsidian and check that the plugin reconnects.
+  2. then, on all the other devices using the old vault name, change it to the new.  
+  If you happen to restart Obsidian on any device still using the old vault name before you complete step 2,
+  the plugin will notice that the remote vault doesn't match the devices's (old) name, and refuse to connect.
+  This is your reminder to rename the vault on this device.
+  
+- Feat: Make it easy to add a new device to group of devices already syncing same vault.
+- Plugin folder (`{configDir}/plugins/obsidian-air-sync`) is now included in the synced dot-paths by
+  default.
+- Per-device settings (`vaultId`, `enableLogging`, `logLevel`, OAuth token expiry) are now stored in
+  IndexedDB instead of `settings.json`, so `settings.json` and the entire plugin folder can be safely
+  synced across devices. Each vault on a shared Obsidian install gets its own isolated record keyed by
+  vault name and config directory.
+- `settings.json` is now split into syncable (group) settings and per-device (instance) settings at the
+  persistence boundary. The file written to disk no longer contains any device-specific values.
+- Connect button now detects the join scenario automatically. If no existing remote vault is found
+  for this vault name a new sync group is created. If an existing group is found and this device
+  previously synced with it, a "Resuming sync" toast is shown. If the local vault is empty, group
+  settings are downloaded and applied before the first sync so the new device immediately inherits
+  the group's configuration. If the local vault already has content that has never been synced with
+  the group, a modal prompts to Cancel or Combine vaults; Cancel disconnects cleanly, Combine seeds
+  settings from the remote and proceeds.
+
+### Fixed
+
+- Stale IDB sync records are now discarded on plugin reinstall, to avoid trashing `.airsync/metadata.json` in remote vault if local vault was empty.
+Previously, reinstalling the plugin
+  (which deletes `settings.json`) left orphaned sync records in IndexedDB. On the first sync after
+  reinstall, warm-mode change detection would see `.airsync/metadata.json` as locally deleted and
+  issue a `delete_remote`, trashing the remote vault identity file on Google Drive. The fix: if
+  `loadData()` returns null on startup, the orchestrator clears all sync records before the first
+  sync, forcing a safe cold scan.
+- `changesStartPageToken` removed from `settings.json` and `backendData`; the MetadataStore IndexedDB
+  is now the sole authoritative store for this value.
+- OAuth PKCE state (`pendingAuthState`, `pendingCodeVerifier`) is no longer written to `settings.json`;
+  it is kept in memory only for the duration of the auth flow, with a debug log if the plugin reloads
+  mid-flow.
 
 ## [0.1.17] - 2026-03-29
 
