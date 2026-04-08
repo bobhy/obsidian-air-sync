@@ -1,4 +1,5 @@
 import { App, Modal } from "obsidian";
+import { AIRSYNC_DIR, METADATA_FILE } from "../constants";
 
 /**
  * Shown when multiple remote vault folders with the same vault name are found
@@ -43,7 +44,7 @@ export class DuplicateVaultModal extends Modal {
 		contentEl.createEl("p", {
 			text:
 				`To fix this, open Google Drive, locate the "obsidian-air-sync" folder, ` +
-				`check the contents of ".airsync/metadata.json" for "vaultName", and delete the redundant ` +
+				`check the contents of "${AIRSYNC_DIR}/${METADATA_FILE}" for "vaultName", and delete the redundant ` +
 				`vault folder(s) so only one remains ` +
 				`for this vault name. Then try connecting again.`,
 		});

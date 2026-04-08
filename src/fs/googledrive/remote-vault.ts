@@ -3,11 +3,8 @@ import type { Logger } from "../../logging/logger";
 import type { RemoteVaultResolution, RemoteVaultMetadata } from "../../sync/remote-vault";
 import { REMOTE_VAULT_ROOT } from "../../sync/remote-vault";
 import { FOLDER_MIME } from "./types";
-import { AIRSYNC_DIR } from "../../constants";
+import { AIRSYNC_DIR, METADATA_FILE } from "../../constants";
 import type { DriveFile } from "./types";
-
-const AIRSYNC_DIR = ".airsync";
-const METADATA_FILE = "metadata.json";
 
 export interface RemoteVaultCallbacks {
 	/** Show a transient notification (toast) to the user. */

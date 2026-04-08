@@ -1,7 +1,7 @@
 import { describe, it, expect, vi } from "vitest";
 import { App, TFile, TFolder } from "obsidian";
 import { LocalFs } from "./index";
-import { AIRSYNC_DIR } from "../../constants";
+import { AIRSYNC_DIR, METADATA_FILE } from "../../constants";
 
 describe("LocalFs", () => {
 	function createLocalFs(syncDotPaths: string[] = []): { app: App; vault: App["vault"]; fs: LocalFs } {
@@ -137,9 +137,9 @@ describe("LocalFs", () => {
 		it("reads metadata.json written by the remote backend", async () => {
 			const { vault, fs } = createLocalFs();
 			const metadata = JSON.stringify({ vaultName: "My Vault" });
-			await vault.adapter.writeBinary(`${AIRSYNC_DIR}/metadata.json`, new TextEncoder().encode(metadata).buffer);
+			await vault.adapter.writeBinary(`${AIRSYNC_DIR}/${METADATA_FILE}`, new TextEncoder().encode(metadata).buffer);
 
-			const result = await fs.read(`${AIRSYNC_DIR}/metadata.json`);
+			const result = await fs.read(`${AIRSYNC_DIR}/${METADATA_FILE}`);
 			expect(new TextDecoder().decode(result)).toBe(metadata);
 		});
 
