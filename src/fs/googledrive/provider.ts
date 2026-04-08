@@ -9,7 +9,6 @@ import { GoogleDriveAuthProviderBase, GoogleDriveProviderBase } from "./provider
 /** All data stored in backendData["googledrive"] (tokens live in SecretStorage) */
 export interface GoogleDriveBackendData {
 	remoteVaultFolderId: string;
-	lastKnownVaultName: string;
 	/**
 	 * Loaded from InstanceStore at startup, not persisted to settings.json.
 	 * Optional because it may be absent on the first sync after a fresh install.
@@ -19,7 +18,6 @@ export interface GoogleDriveBackendData {
 
 const DEFAULT_GDRIVE_DATA: GoogleDriveBackendData = {
 	remoteVaultFolderId: "",
-	lastKnownVaultName: "",
 };
 
 /** Type-safe accessor for Google Drive backend data */

@@ -250,7 +250,7 @@ describe("GoogleDriveAuthProvider.getOrCreateGoogleAuth", () => {
 		const existingAuth = new GoogleAuth();
 		authInternal.googleAuth = existingAuth;
 
-		const data = { remoteVaultFolderId: "folder", lastKnownVaultName: "" };
+		const data = { remoteVaultFolderId: "folder" };
 
 		const auth = provider.auth.getOrCreateGoogleAuth(data);
 		expect(auth).toBe(existingAuth);
@@ -261,7 +261,7 @@ describe("GoogleDriveAuthProvider.getOrCreateGoogleAuth", () => {
 		const secretStore = createMockSecretStore();
 		const provider = new GoogleDriveProvider(secretStore);
 
-		const data = { remoteVaultFolderId: "folder", lastKnownVaultName: "" };
+		const data = { remoteVaultFolderId: "folder" };
 
 		const auth = provider.auth.getOrCreateGoogleAuth(data);
 		expect(auth).toBeDefined();

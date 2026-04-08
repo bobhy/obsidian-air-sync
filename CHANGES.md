@@ -5,9 +5,24 @@ All notable changes to this project will be documented in this file.
 The format is based on [Keep a Changelog](https://keepachangelog.com/en/1.1.0/),
 and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0.html).
 
+## [0.2.1] - 2026-04-08
+
+### Changed
+
+- Removed remote-vault rename support introduced in 0.2.0. Obsidian does not permit renaming
+  the currently open vault through the vault manager, so the rename-detection logic was
+  unreachable in practice.
+- When connecting via a cached folder ID, if `.airsync/metadata.json` is missing or contains
+  no `vaultName`, the plugin now writes the local vault name into it rather than failing.
+  This covers two legitimate cases: initial creation of a remote vault and recovery after
+  accidental deletion of the metadata file.
+- A name mismatch between the local vault and `metadata.json` still shows an error modal and
+  aborts the connection, unchanged from 0.2.0.
+
 ## [0.2.0] - 2026-03-29
 
 ### Changed
+
 - Forked from version 0.1.17 of Takehito Gondo, without whose original design we would be lost.
   Starting new release chain at 0.2.0.
 

@@ -115,15 +115,6 @@ export class BackendManager {
 	): Promise<{ wasCreated: boolean }> {
 		const vaultName = this.deps.getVaultName();
 		const type = provider.type;
-		const backendData = settings.backendData[type] as Record<string, unknown> | undefined;
-		const cachedFolderId = backendData?.remoteVaultFolderId as string | undefined;
-		const lastKnownName = backendData?.lastKnownVaultName as string | undefined;
-
-		// Skip network call if already linked and name unchanged
-		if (cachedFolderId && lastKnownName === vaultName) {
-			return { wasCreated: false };
-		}
-
 		const result = await provider.resolveRemoteVault!(
 			this.deps.getApp(), settings, vaultName, this.deps.getLogger()
 		);

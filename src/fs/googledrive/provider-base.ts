@@ -236,8 +236,7 @@ export abstract class GoogleDriveProviderBase implements IBackendProvider {
 		googleAuth.setTokens(tokens.refreshToken, tokens.accessToken, data.accessTokenExpiry ?? 0);
 		const client = new DriveClient((force) => googleAuth.getAccessToken(force), logger);
 		const cachedFolderId = data.remoteVaultFolderId || undefined;
-		const lastKnownVaultName = data.lastKnownVaultName || undefined;
-		return resolveGDriveRemoteVault(client, vaultName, cachedFolderId, lastKnownVaultName, logger, {
+		return resolveGDriveRemoteVault(client, vaultName, cachedFolderId, logger, {
 			notify: (message) => new Notice(message, 10_000),
 			promptDuplicateVaults: (name, count) => DuplicateVaultModal.prompt(app, name, count),
 			promptVaultNameMismatch: (localName, remoteName) => VaultNameMismatchModal.prompt(app, localName, remoteName),
