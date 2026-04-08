@@ -11,11 +11,8 @@ and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0
 - Forked from version 0.1.17 of Takehito Gondo, without whose original design we would be lost.
   Starting new release chain at 0.2.0.
 
-### Changed
 - `.airsync` (the sync-state folder) is no longer synced by default. Users who want it
-  synced can add `.airsync` to the *Dot paths to sync* list. `LocalFs` now uses the Obsidian
-  vault API for all normal paths and falls back to raw file I/O only for dot-prefixed paths
-  explicitly listed for sync; the `DotPathAdapter` shim has been removed.
+  synced can add `.airsync` to the *Dot paths to sync* list. 
 
 ## [0.1.17] - 2026-03-29
 
