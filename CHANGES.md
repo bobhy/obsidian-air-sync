@@ -14,6 +14,14 @@ and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0
 - `.airsync` (the sync-state folder) is no longer synced by default. Users who want it
   synced can add `.airsync` to the *Dot paths to sync* list. 
 
+### Added
+- New conflict strategy **Auto merge (optimized)** (`auto_merge_optimize`): uses `diff3Merge`
+  for conflict rendering so that conflict markers span only the lines that actually differ.
+  Common leading and trailing lines appear outside the markers, matching git's default
+  conflict style. Multiple independent conflict sites each get their own marker block.
+  Clean-merge detection still uses the `diffIndices`-based path to avoid false conflicts on
+  non-overlapping nearby changes.
+
 ## [0.1.17] - 2026-03-29
 
 ### Added
