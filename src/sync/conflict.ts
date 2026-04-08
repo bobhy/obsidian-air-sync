@@ -4,10 +4,10 @@ import type { SyncRecord } from "./types";
 import type { SyncStateStore } from "./state";
 import type { Logger } from "../logging/logger";
 import { getFileExtension } from "../utils/path";
-import { isMergeEligible, threeWayMerge, threeWayMergeOptimize } from "./merge";
+import { isMergeEligible, threeWayMergeOptimize } from "./merge";
 
 /** Internal strategy used by the low-level conflict resolver */
-export type ResolverStrategy = "keep_newer" | "keep_local" | "keep_remote" | "duplicate" | "auto_merge" | "auto_merge_optimize";
+export type ResolverStrategy = "keep_newer" | "keep_local" | "keep_remote" | "duplicate" | "auto_merge";
 
 export interface ConflictResolutionResult {
 	/** The action that was taken */
@@ -53,9 +53,6 @@ export async function resolveWithStrategy(
 
 		case "auto_merge":
 			return attemptThreeWayMerge(ctx, fallback ?? "keep_newer");
-
-		case "auto_merge_optimize":
-			return attemptThreeWayMerge(ctx, fallback ?? "keep_newer", true);
 	}
 }
 
@@ -203,10 +200,9 @@ function insertConflictSuffix(path: string, seq: number | string): string {
 async function attemptThreeWayMerge(
 	ctx: ConflictContext,
 	fallback: FallbackResolver = "keep_newer",
-	optimize = false,
 ): Promise<ConflictResolutionResult> {
 	const { path, localFs, remoteFs, local, remote, prevSync, stateStore, logger } = ctx;
-	const tag = optimize ? "auto_merge_optimize" : "auto_merge";
+	const tag = "auto_merge";
 
 	logger?.debug(`${tag}: attempting 3-way merge`, { path });
 
@@ -261,9 +257,7 @@ async function attemptThreeWayMerge(
 
 	let mergeResult;
 	try {
-		mergeResult = optimize
-			? threeWayMergeOptimize(baseText, localText, remoteText)
-			: threeWayMerge(baseText, localText, remoteText);
+		mergeResult = threeWayMergeOptimize(baseText, localText, remoteText);
 	} catch (mergeErr) {
 		const fb = await resolveFallback();
 		logger?.warn(`${tag}: falling back — merge threw an exception`, {
@@ -317,7 +311,7 @@ async function attemptThreeWayMerge(
 	}
 
 	return {
-		action: optimize ? "opti_merged" : "merged",
+		action: "merged",
 		hasConflictMarkers: mergeResult.hasConflicts,
 	};
 }

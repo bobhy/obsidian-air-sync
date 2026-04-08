@@ -21,14 +21,12 @@ and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0
   If duplicates are found but none matches cached ID, the user gets an error and the connection fails —
   the user must manually remove the duplicate vault folder from Google Drive before retrying.
 
-### Added
-- New conflict strategy **Auto merge (optimized)** (`auto_merge_optimize`): uses `diff3Merge`
+- Improve conflict strategy **Auto merge** (`auto_merge`): to use  `diff3Merge`
   for conflict rendering so that conflict markers span only the lines that actually differ.
   Common leading and trailing lines appear outside the markers, matching git's default
-  conflict style. Multiple independent conflict sites each get their own marker block.
-  Clean-merge detection still uses the `diffIndices`-based path to avoid false conflicts on
-  non-overlapping nearby changes.
+  conflict style.
 
+### Added
 - Feat: Handle rename of shared remote vault (imperfectly).
   Because Obsidian doesn't notify plugin when vault is renamed by Obsidian vault manager...
   For now: when multiple devices sync to same remote vault:
