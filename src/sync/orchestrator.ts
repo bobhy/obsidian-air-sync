@@ -15,6 +15,7 @@ import { AuthError } from "../fs/errors";
 import { getErrorInfo, isRateLimitError, sleep } from "./error";
 import type { SyncStatus } from "./types";
 import { buildSyncRecord } from "./state-committer";
+import { computeSignature, readRemoteSignature, writeRemoteSignature } from "./signature";
 
 export type { SyncStatus };
 
@@ -47,6 +48,7 @@ function buildNotificationMessage(cycle: SyncCycleResult): string {
 
 export interface SyncOrchestratorDeps {
 	getSettings: () => AirSyncSettings;
+	getVaultName: () => string;
 	saveSettings: () => Promise<void>;
 	localFs: () => IFileSystem | null;
 	remoteFs: () => IFileSystem | null;
@@ -58,8 +60,19 @@ export interface SyncOrchestratorDeps {
 	isMobile: () => boolean;
 	/** Returns true when the backend is in the process of connecting */
 	isBackendConnecting?: () => boolean;
+	/** Returns true when the user has manually paused sync */
+	isPaused?: () => boolean;
 	localTracker: LocalChangeTracker;
 	logger?: Logger;
+	clientId: string;
+	getLocalSignature: () => Promise<string>;
+	saveLocalSignature: (sig: string) => Promise<void>;
+	/**
+	 * Called when a sync plan would affect more than 10% of tracked files.
+	 * Resolves to true to proceed, false to skip the sync cycle.
+	 * If absent, the sync proceeds without confirmation.
+	 */
+	confirmDestructiveSync?: (destructiveCount: number, knownFileCount: number) => Promise<boolean>;
 }
 
 const MAX_RETRIES = 3;
@@ -68,12 +81,12 @@ export class SyncOrchestrator {
 	private syncMutex = new AsyncMutex();
 	private stateStore: SyncStateStore;
 	private syncPending = false;
+	private startupCheckDone = false;
 	private deps: SyncOrchestratorDeps;
 
 	constructor(deps: SyncOrchestratorDeps) {
 		this.deps = deps;
-		const vaultId = deps.getSettings().vaultId;
-		this.stateStore = new SyncStateStore(vaultId);
+		this.stateStore = new SyncStateStore(deps.getVaultName());
 	}
 
 	get state(): SyncStateStore {
@@ -127,6 +140,11 @@ export class SyncOrchestrator {
 
 		if (this.deps.isBackendConnecting?.()) {
 			this.deps.logger?.debug("runSync: skipped — backend connecting");
+			return;
+		}
+
+		if (this.deps.isPaused?.()) {
+			this.deps.logger?.debug("runSync: skipped — sync paused");
 			return;
 		}
 
@@ -267,6 +285,33 @@ export class SyncOrchestrator {
 		}
 		const settings = this.deps.getSettings();
 
+		// Startup signature check: runs once per session to decide full vs incremental sync
+		if (!this.startupCheckDone) {
+			this.startupCheckDone = true;
+			try {
+				const localSig = await this.deps.getLocalSignature();
+				const remoteSig = await readRemoteSignature(remoteFs, this.deps.clientId);
+				this.deps.logger?.info("Sync signature check", {
+					localSig,
+					remoteSig,
+					clientId: this.deps.clientId,
+					match: localSig === remoteSig,
+				});
+				if (localSig !== remoteSig) {
+					this.deps.logger?.warn("Sync signature mismatch — clearing sync state for full sync", {
+						localSig,
+						remoteSig,
+					});
+					await this.stateStore.clear();
+				}
+			} catch (e) {
+				this.deps.logger?.warn("Failed to read sync signatures — falling back to full sync", {
+					error: e instanceof Error ? e.message : String(e),
+				});
+				await this.stateStore.clear();
+			}
+		}
+
 		const changeSet = await collectChanges({
 			localFs,
 			remoteFs,
@@ -348,6 +393,29 @@ export class SyncOrchestrator {
 
 		const total = plan.actions.length;
 
+		// 10% destructive-sync guard: count deletes + pulls of existing local files
+		let executablePlan = plan;
+		if (this.deps.confirmDestructiveSync) {
+			const knownFileCount = (await this.stateStore.getAll()).length;
+			const destructiveCount = plan.actions.filter(
+				(a) => a.action === "delete_local" || (a.action === "pull" && a.local !== undefined),
+			).length;
+			if (knownFileCount > 0 && destructiveCount / knownFileCount > 0.1) {
+				const proceed = await this.deps.confirmDestructiveSync(destructiveCount, knownFileCount);
+				if (!proceed) {
+					this.deps.logger?.info("Sync skipped by user — destructive plan exceeded 10% threshold", {
+						destructiveCount,
+						knownFileCount,
+					});
+					return { succeeded: [], failed: [], conflicts: [] };
+				}
+				// User confirmed — override the safety-abort check so executePlan proceeds
+				if (plan.safetyCheck.shouldAbort) {
+					executablePlan = { ...plan, safetyCheck: { ...plan.safetyCheck, shouldAbort: false } };
+				}
+			}
+		}
+
 		const ctx: ExecutionContext = {
 			localFs,
 			remoteFs,
@@ -366,7 +434,23 @@ export class SyncOrchestrator {
 			logger: this.deps.logger,
 		};
 
-		const result = await executePlan(plan, ctx);
+		const result = await executePlan(executablePlan, ctx);
+
+		// Update sync signature after a fully successful sync
+		if (result.failed.length === 0) {
+			const sig = computeSignature(plan);
+			if (sig !== "0") {
+				try {
+					// Remote first (per spec): remote write failing leaves local sig stale → full sync next time
+					await writeRemoteSignature(remoteFs, this.deps.clientId, sig);
+					await this.deps.saveLocalSignature(sig);
+				} catch (e) {
+					this.deps.logger?.warn("Failed to update sync signature", {
+						error: e instanceof Error ? e.message : String(e),
+					});
+				}
+			}
+		}
 
 		// Persist backend state
 		const provider = this.deps.backendProvider();

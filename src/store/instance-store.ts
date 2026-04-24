@@ -2,35 +2,38 @@ import { IDBHelper, sanitizeDbName } from "./idb-helper";
 
 /** Per-device settings that are not synced across the group */
 export interface InstanceSettings {
-	/** Unique identifier for this device/install */
-	vaultId: string;
 	/** Write sync logs to .airsync/logs/{device}/{date}.log */
 	enableLogging: boolean;
 	/** Minimum log level to write */
 	logLevel: "debug" | "info" | "warn" | "error";
 	/** Per-backend instance state keyed by backend type */
 	backendInstance: Record<string, { accessTokenExpiry: number }>;
+	/** Hash of the last sync pass that modified files; "0" when no sync history */
+	lastSyncSignature: string;
+	/** Absolute vault path on desktop; empty on mobile. Used to detect same-name vault collisions. */
+	vaultPath: string;
 }
 
 export const DEFAULT_INSTANCE_SETTINGS: InstanceSettings = {
-	vaultId: "",
 	enableLogging: false,
 	logLevel: "info",
 	backendInstance: {},
+	lastSyncSignature: "0",
+	vaultPath: "",
 };
+
+/** Per-device record stored at the fixed key "__device__" — shared across all vaults on this device */
+export interface DeviceRecord {
+	clientId: string;
+}
+
+const DEVICE_KEY = "__device__";
 
 const STORE_NAME = "settings";
 
-/**
- * Compute the IDB record key for a given vault.
- *
- * On desktop, `basePath` (the absolute filesystem path from FileSystemAdapter.getBasePath())
- * uniquely identifies the vault even when two vaults share the same name.
- * On mobile there is only ever one active vault, so the name+configDir fallback is sufficient.
- */
-export function vaultInstanceKey(vaultName: string, configDir: string, basePath?: string): string {
-	const discriminator = basePath ?? `${vaultName}_${configDir}`;
-	return sanitizeDbName(discriminator);
+/** Compute the IDB record key for a given vault — the sanitized vault name. */
+export function vaultInstanceKey(vaultName: string): string {
+	return sanitizeDbName(vaultName);
 }
 
 /**
@@ -70,6 +73,25 @@ export class InstanceStore {
 	async save(vaultKey: string, data: InstanceSettings): Promise<void> {
 		await this.idb.runTransaction(STORE_NAME, "readwrite", (tx) => {
 			tx.objectStore(STORE_NAME).put(data, vaultKey);
+			return () => undefined;
+		});
+	}
+
+	async loadDevice(): Promise<DeviceRecord> {
+		try {
+			const result = await this.idb.runTransaction(STORE_NAME, "readonly", (tx) => {
+				const req = tx.objectStore(STORE_NAME).get(DEVICE_KEY);
+				return () => req.result as DeviceRecord | undefined;
+			});
+			return result ?? { clientId: "" };
+		} catch {
+			return { clientId: "" };
+		}
+	}
+
+	async saveDevice(record: DeviceRecord): Promise<void> {
+		await this.idb.runTransaction(STORE_NAME, "readwrite", (tx) => {
+			tx.objectStore(STORE_NAME).put(record, DEVICE_KEY);
 			return () => undefined;
 		});
 	}

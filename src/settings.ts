@@ -1,8 +1,6 @@
 import type { ConflictStrategy } from "./sync/types";
 
 export interface AirSyncSettings {
-	/** Unique identifier for this vault (used as IndexedDB key) */
-	vaultId: string;
 	/** Selected backend type (e.g. "googledrive") */
 	backendType: string;
 	/** Strategy for conflict resolution */
@@ -26,7 +24,6 @@ export interface AirSyncSettings {
 }
 
 export const DEFAULT_SETTINGS: AirSyncSettings = {
-	vaultId: "",
 	backendType: "googledrive",
 	conflictStrategy: "auto_merge",
 	ignorePatterns: [],
@@ -43,7 +40,7 @@ export const DEFAULT_SETTINGS: AirSyncSettings = {
  * AirSyncSettings serves as the single in-memory runtime type to avoid touching every
  * call site; SyncableSettings is only used at the persistence boundary (saveData).
  */
-export type SyncableSettings = Omit<AirSyncSettings, "vaultId" | "enableLogging" | "logLevel">;
+export type SyncableSettings = Omit<AirSyncSettings, "enableLogging" | "logLevel">;
 
 /** Backend fields that are per-device — stripped from backendData before writing to settings.json */
 const INSTANCE_BACKEND_KEYS = [

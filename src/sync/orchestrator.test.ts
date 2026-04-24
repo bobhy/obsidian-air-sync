@@ -5,10 +5,10 @@ import type { SyncOrchestratorDeps } from "./orchestrator";
 import { LocalChangeTracker } from "./local-tracker";
 import { createMockFs, addFile } from "../__mocks__/sync-test-helpers";
 import { AuthError } from "../fs/errors";
+import type { SyncRecord } from "./types";
 
 function mockSettings() {
 	return {
-		vaultId: `test-${Math.random()}`,
 		backendType: "none",
 		ignorePatterns: [] as string[],
 		syncDotPaths: [] as string[],
@@ -26,6 +26,7 @@ function createDeps(overrides: Partial<SyncOrchestratorDeps> = {}): SyncOrchestr
 	const remoteFs = createMockFs("remote");
 	return {
 		getSettings: () => mockSettings(),
+		getVaultName: () => "test-vault",
 		saveSettings: vi.fn().mockResolvedValue(undefined),
 		localFs: () => localFs,
 		remoteFs: () => remoteFs,
@@ -35,6 +36,9 @@ function createDeps(overrides: Partial<SyncOrchestratorDeps> = {}): SyncOrchestr
 		notify: vi.fn(),
 		isMobile: () => false,
 		localTracker: new LocalChangeTracker(),
+		clientId: "test-client",
+		getLocalSignature: () => Promise.resolve("0"),
+		saveLocalSignature: () => Promise.resolve(),
 		...overrides,
 	};
 }
@@ -479,6 +483,184 @@ describe("SyncOrchestrator", () => {
 
 			const all = await orchestrator.state.getAll();
 			expect(all).toHaveLength(0);
+			await orchestrator.close();
+		});
+	});
+
+	describe("startup signature check", () => {
+		function makeRecord(path: string): SyncRecord {
+			return { path, hash: "abc", localMtime: 1000, remoteMtime: 1000, localSize: 3, remoteSize: 3, syncedAt: 1000 };
+		}
+
+		it("clears state store when local and remote signatures differ", async () => {
+			const localFs = createMockFs("local");
+			const remoteFs = createMockFs("remote");
+			const deps = createDeps({
+				localFs: () => localFs,
+				remoteFs: () => remoteFs,
+				getLocalSignature: () => Promise.resolve("111"),
+			});
+			// Write remote signature with a different value
+			addFile(remoteFs, ".airsync/test-client.json", JSON.stringify({ lastSyncSignature: "222" }));
+
+			const orchestrator = new SyncOrchestrator(deps);
+			await orchestrator.state.put(makeRecord("a.md"));
+
+			const clearSpy = vi.spyOn(orchestrator.state, "clear");
+			await orchestrator.runSync();
+
+			expect(clearSpy).toHaveBeenCalled();
+			await orchestrator.close();
+		});
+
+		it("does not clear state store when signatures match", async () => {
+			const localFs = createMockFs("local");
+			const remoteFs = createMockFs("remote");
+			const deps = createDeps({
+				localFs: () => localFs,
+				remoteFs: () => remoteFs,
+				getLocalSignature: () => Promise.resolve("matched-sig"),
+			});
+			addFile(remoteFs, ".airsync/test-client.json", JSON.stringify({ lastSyncSignature: "matched-sig" }));
+
+			const orchestrator = new SyncOrchestrator(deps);
+			await orchestrator.state.put(makeRecord("a.md"));
+
+			const clearSpy = vi.spyOn(orchestrator.state, "clear");
+			await orchestrator.runSync();
+
+			expect(clearSpy).not.toHaveBeenCalled();
+			await orchestrator.close();
+		});
+
+		it("clears state when both signatures are '0' (no prior sync)", async () => {
+			const localFs = createMockFs("local");
+			const remoteFs = createMockFs("remote");
+			const deps = createDeps({
+				localFs: () => localFs,
+				remoteFs: () => remoteFs,
+				getLocalSignature: () => Promise.resolve("0"),
+			});
+			// No remote signature file → readRemoteSignature returns "0"
+
+			const orchestrator = new SyncOrchestrator(deps);
+			const clearSpy = vi.spyOn(orchestrator.state, "clear");
+			await orchestrator.runSync();
+
+			// Both are "0" — they match, so no clear
+			expect(clearSpy).not.toHaveBeenCalled();
+			await orchestrator.close();
+		});
+
+		it("runs startup check only once across multiple syncs", async () => {
+			const localFs = createMockFs("local");
+			const remoteFs = createMockFs("remote");
+			let sigCalls = 0;
+			const deps = createDeps({
+				localFs: () => localFs,
+				remoteFs: () => remoteFs,
+				getLocalSignature: () => { sigCalls++; return Promise.resolve("0"); },
+			});
+
+			const orchestrator = new SyncOrchestrator(deps);
+			await orchestrator.runSync();
+			await orchestrator.runSync();
+			await orchestrator.runSync();
+
+			expect(sigCalls).toBe(1);
+			await orchestrator.close();
+		});
+	});
+
+	describe("10% destructive-sync guard", () => {
+		// "content X" is 9 bytes — localSize must match so hasChanged() returns false → delete_local (not conflict)
+		function makeRecord(path: string): SyncRecord {
+			return { path, hash: "", localMtime: 1000, remoteMtime: 1000, localSize: 9, remoteSize: 9, syncedAt: 1000 };
+		}
+
+		it("skips sync when user declines a destructive plan", async () => {
+			const localFs = createMockFs("local");
+			const remoteFs = createMockFs("remote");
+			const confirmDestructiveSync = vi.fn().mockResolvedValue(false);
+			const deps = createDeps({
+				localFs: () => localFs,
+				remoteFs: () => remoteFs,
+				confirmDestructiveSync,
+			});
+
+			const orchestrator = new SyncOrchestrator(deps);
+
+			// Pre-populate 10 files in local + state store (not in remote → all delete_local)
+			for (let i = 0; i < 10; i++) {
+				addFile(localFs, `file${i}.md`, `content ${i}`);
+				await orchestrator.state.put(makeRecord(`file${i}.md`));
+			}
+			// Warm mode detects remote deletions only via getChangedPaths
+			const deleted = Array.from({ length: 10 }, (_, i) => `file${i}.md`);
+			vi.spyOn(remoteFs, "getChangedPaths").mockResolvedValue({ modified: [], deleted });
+
+			await orchestrator.runSync();
+
+			expect(confirmDestructiveSync).toHaveBeenCalledTimes(1);
+			// Files should NOT be deleted since user declined
+			expect(localFs.files.size).toBe(10);
+			await orchestrator.close();
+		});
+
+		it("proceeds when user confirms a destructive plan", async () => {
+			const localFs = createMockFs("local");
+			const remoteFs = createMockFs("remote");
+			const confirmDestructiveSync = vi.fn().mockResolvedValue(true);
+			const deps = createDeps({
+				localFs: () => localFs,
+				remoteFs: () => remoteFs,
+				confirmDestructiveSync,
+			});
+
+			const orchestrator = new SyncOrchestrator(deps);
+
+			for (let i = 0; i < 10; i++) {
+				addFile(localFs, `file${i}.md`, `content ${i}`);
+				await orchestrator.state.put(makeRecord(`file${i}.md`));
+			}
+			// Warm mode detects remote deletions only via getChangedPaths
+			const deleted = Array.from({ length: 10 }, (_, i) => `file${i}.md`);
+			vi.spyOn(remoteFs, "getChangedPaths").mockResolvedValue({ modified: [], deleted });
+
+			await orchestrator.runSync();
+
+			expect(confirmDestructiveSync).toHaveBeenCalledTimes(1);
+			// Files should be deleted since user confirmed
+			expect(localFs.files.size).toBe(0);
+			await orchestrator.close();
+		});
+
+		it("does not invoke guard when plan is below 10% threshold", async () => {
+			const localFs = createMockFs("local");
+			const remoteFs = createMockFs("remote");
+			const confirmDestructiveSync = vi.fn().mockResolvedValue(false);
+			const deps = createDeps({
+				localFs: () => localFs,
+				remoteFs: () => remoteFs,
+				confirmDestructiveSync,
+			});
+
+			const orchestrator = new SyncOrchestrator(deps);
+
+			// 100 files in state store, only 1 deleted → 1% ratio
+			for (let i = 0; i < 100; i++) {
+				const path = `file${i}.md`;
+				addFile(localFs, path, `content ${i}`);
+				addFile(remoteFs, path, `content ${i}`);
+				await orchestrator.state.put(makeRecord(path));
+			}
+			// Delete one from remote and report it via getChangedPaths
+			remoteFs.files.delete("file0.md");
+			vi.spyOn(remoteFs, "getChangedPaths").mockResolvedValue({ modified: [], deleted: ["file0.md"] });
+
+			await orchestrator.runSync();
+
+			expect(confirmDestructiveSync).not.toHaveBeenCalled();
 			await orchestrator.close();
 		});
 	});

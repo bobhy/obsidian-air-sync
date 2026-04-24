@@ -1,10 +1,8 @@
-import type { App } from "obsidian";
 import { Notice } from "obsidian";
 import { getBackendData } from "../backend";
 import type { ISecretStore } from "../secret-store";
 import type { AirSyncSettings } from "../../settings";
 import type { Logger } from "../../logging/logger";
-import type { RemoteVaultResolution } from "../../sync/remote-vault";
 import { GoogleAuthDirect } from "./auth";
 import type { IGoogleAuth } from "./auth";
 import { GoogleDriveAuthProviderBase, GoogleDriveProviderBase } from "./provider-base";
@@ -23,7 +21,7 @@ export interface GoogleDriveCustomBackendData extends GoogleDriveBackendData {
 }
 
 const DEFAULT_GDRIVE_CUSTOM_DATA: GoogleDriveCustomBackendData = {
-	remoteVaultFolderId: "",
+	remoteVaultFolder: "",
 	customClientId: "",
 	customClientSecret: "",
 	customScope: "",
@@ -124,19 +122,6 @@ export class GoogleDriveCustomProvider extends GoogleDriveProviderBase {
 		this.auth = new GoogleDriveCustomAuthProvider(secretStore);
 	}
 
-	async resolveRemoteVault(
-		app: App,
-		settings: AirSyncSettings,
-		vaultName: string,
-		logger?: Logger,
-	): Promise<RemoteVaultResolution> {
-		const data = this.getData(settings);
-		if (!data.remoteVaultFolderId) {
-			throw new Error("Remote vault folder id is required for custom OAuth. Set it in the plugin settings.");
-		}
-		return super.resolveRemoteVault(app, settings, vaultName, logger);
-	}
-
 	async disconnect(settings: AirSyncSettings): Promise<Record<string, unknown>> {
 		await this.auth.revokeAuth();
 		clearTokens(this.secretStore, this.type);
@@ -148,7 +133,6 @@ export class GoogleDriveCustomProvider extends GoogleDriveProviderBase {
 			customScope: data.customScope,
 			customRedirectUri: data.customRedirectUri,
 			customIncludeGrantedScopes: data.customIncludeGrantedScopes,
-			remoteVaultFolderId: data.remoteVaultFolderId,
 		};
 	}
 

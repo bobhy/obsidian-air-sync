@@ -13,7 +13,6 @@ import { GoogleDriveFs } from "./index";
 import { MetadataStore } from "../../store/metadata-store";
 import { resolveGDriveRemoteVault } from "./remote-vault";
 import { DuplicateVaultModal } from "../../ui/duplicate-vault-modal";
-import { VaultNameMismatchModal } from "../../ui/vault-name-mismatch-modal";
 import type { DriveFile } from "./types";
 import type { GoogleDriveBackendData } from "./provider";
 import { storeTokens, readTokens, hasRefreshToken, clearTokens } from "../token-store";
@@ -177,32 +176,33 @@ export abstract class GoogleDriveProviderBase implements IBackendProvider {
 	createFs(app: App, settings: AirSyncSettings, logger?: Logger): IFileSystem | null {
 		const data = this.getData(settings);
 		const tokens = readTokens(this.secretStore, this.type);
-		if (!tokens.refreshToken || !data.remoteVaultFolderId) return null;
+		if (!tokens.refreshToken || !data.remoteVaultFolder) return null;
 
 		const googleAuth = this.auth.getOrCreateGoogleAuth(data, logger);
 		googleAuth.setTokens(tokens.refreshToken, tokens.accessToken, data.accessTokenExpiry ?? 0);
 		const client = new DriveClient((force) => googleAuth.getAccessToken(force), logger);
-		const metadataStore = new MetadataStore<DriveFile>(`${settings.vaultId}-${data.remoteVaultFolderId}`, {
+		const vaultName = app.vault.getName();
+		const metadataStore = new MetadataStore<DriveFile>(vaultName, {
 			dbNamePrefix: "air-sync-drive",
 			version: 1,
 		});
 		// changesStartPageToken is owned by MetadataStore IDB — not seeded from settings
-		return new GoogleDriveFs(client, data.remoteVaultFolderId, logger, metadataStore);
+		return new GoogleDriveFs(client, data.remoteVaultFolder, logger, metadataStore);
 	}
 
 	isConnected(settings: AirSyncSettings): boolean {
-		return hasRefreshToken(this.secretStore, this.type) && !!this.getData(settings).remoteVaultFolderId;
+		return hasRefreshToken(this.secretStore, this.type) && !!this.getData(settings).remoteVaultFolder;
 	}
 
 	getSyncTarget(settings: AirSyncSettings): string | null {
 		const data = this.getData(settings);
-		if (!data.remoteVaultFolderId) return null;
-		return `${this.type}:${data.remoteVaultFolderId}`;
+		if (!data.remoteVaultFolder) return null;
+		return `${this.type}:${data.remoteVaultFolder}`;
 	}
 
 	resetTargetState(_settings: AirSyncSettings): void {
-		// changesStartPageToken is now owned by MetadataStore IDB, keyed by remoteVaultFolderId,
-		// so it resets automatically when the remote target changes
+		// changesStartPageToken is owned by MetadataStore IDB and resets automatically
+		// when the remote target changes
 	}
 
 	readBackendState(fs: IFileSystem): Record<string, unknown> {
@@ -235,11 +235,9 @@ export abstract class GoogleDriveProviderBase implements IBackendProvider {
 		const googleAuth = this.auth.getOrCreateGoogleAuth(data, logger);
 		googleAuth.setTokens(tokens.refreshToken, tokens.accessToken, data.accessTokenExpiry ?? 0);
 		const client = new DriveClient((force) => googleAuth.getAccessToken(force), logger);
-		const cachedFolderId = data.remoteVaultFolderId || undefined;
-		return resolveGDriveRemoteVault(client, vaultName, cachedFolderId, logger, {
+		return resolveGDriveRemoteVault(client, vaultName, logger, {
 			notify: (message) => new Notice(message, 10_000),
 			promptDuplicateVaults: (name, count) => DuplicateVaultModal.prompt(app, name, count),
-			promptVaultNameMismatch: (localName, remoteName) => VaultNameMismatchModal.prompt(app, localName, remoteName),
 		});
 	}
 

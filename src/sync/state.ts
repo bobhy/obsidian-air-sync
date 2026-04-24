@@ -10,9 +10,9 @@ const DB_VERSION = 3;
 export class SyncStateStore {
 	private helper: IDBHelper;
 
-	constructor(vaultId: string) {
+	constructor(vaultName: string) {
 		this.helper = new IDBHelper({
-			dbName: `${DB_NAME_PREFIX}-${sanitizeDbName(vaultId)}`,
+			dbName: `${DB_NAME_PREFIX}-${sanitizeDbName(vaultName)}`,
 			version: DB_VERSION,
 			onUpgrade: (db, oldVersion) => {
 				// Cold start: drop all stores and recreate on any schema version change

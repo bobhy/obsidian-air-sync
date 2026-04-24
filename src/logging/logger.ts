@@ -31,14 +31,10 @@ function sanitizeDeviceName(name: string): string {
 	return sanitized || "unknown";
 }
 
-/**
- * Detect a device name for the current platform.
- * Returns "{device}-{vaultId}" when a vaultId is provided so that
- * logs and conflict history are scoped per device AND per vault.
- */
-export function getDeviceName(isMobile: boolean, vaultId?: string): string {
-	const device = isMobile ? "mobile" : "desktop";
-	return vaultId ? `${device}-${vaultId}` : device;
+/** Build the device name used for log directories. Incorporates clientId when available. */
+export function getDeviceName(isMobile: boolean, clientId?: string): string {
+	const platform = isMobile ? "mobile" : "desktop";
+	return clientId ? `${platform}-${clientId}` : platform;
 }
 
 export class Logger {

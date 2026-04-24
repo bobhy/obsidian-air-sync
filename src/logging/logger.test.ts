@@ -143,12 +143,7 @@ describe("Logger", () => {
 		expect(adapter.dirs.has(".airsync/logs/desktop")).toBe(true);
 	});
 
-	it("getDeviceName returns '{device}-{vaultId}' when vaultId is provided", () => {
-		expect(getDeviceName(true, "abc123")).toBe("mobile-abc123");
-		expect(getDeviceName(false, "xyz789")).toBe("desktop-xyz789");
-	});
-
-	it("getDeviceName returns device only when no vaultId", () => {
+	it("getDeviceName returns platform label", () => {
 		expect(getDeviceName(true)).toBe("mobile");
 		expect(getDeviceName(false)).toBe("desktop");
 	});

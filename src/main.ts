@@ -1,8 +1,10 @@
 import { Notice, Platform, Plugin } from "obsidian";
 import { DEFAULT_SETTINGS, AirSyncSettings, toSyncable } from "./settings";
-import { InstanceStore, InstanceSettings, DEFAULT_INSTANCE_SETTINGS, vaultInstanceKey } from "./store/instance-store";
+import { InstanceStore, InstanceSettings, vaultInstanceKey } from "./store/instance-store";
+import { resolveClientId } from "./store/client-id";
 import { AirSyncSettingTab } from "./ui/settings";
 import { JoinConflictModal } from "./ui/join-conflict-modal";
+import { DestructiveSyncModal } from "./ui/destructive-sync-modal";
 import { LocalFs } from "./fs/local/index";
 import { BackendManager } from "./fs/backend-manager";
 import { initRegistry } from "./fs/registry";
@@ -14,7 +16,7 @@ import { LocalChangeTracker } from "./sync/local-tracker";
 import { Logger, getDeviceName } from "./logging/logger";
 import type { LoggerAdapter } from "./logging/logger";
 
-function extractInstance(settings: AirSyncSettings): InstanceSettings {
+function extractInstance(settings: AirSyncSettings, vaultPath: string, lastSyncSignature: string): InstanceSettings {
 	const backendInstance: Record<string, { accessTokenExpiry: number }> = {};
 	for (const [type, data] of Object.entries(settings.backendData)) {
 		if (typeof data.accessTokenExpiry === "number") {
@@ -22,10 +24,11 @@ function extractInstance(settings: AirSyncSettings): InstanceSettings {
 		}
 	}
 	return {
-		vaultId: settings.vaultId,
 		enableLogging: settings.enableLogging,
 		logLevel: settings.logLevel,
 		backendInstance,
+		lastSyncSignature,
+		vaultPath,
 	};
 }
 
@@ -46,10 +49,12 @@ function mergeBackendInstance(
 export default class AirSyncPlugin extends Plugin {
 	settings!: AirSyncSettings;
 	private instanceStore: InstanceStore = new InstanceStore();
+	clientId = "";
 	private localFs: LocalFs | null = null;
 	backendManager!: BackendManager;
 	private statusBarEl: HTMLElement | null = null;
 	private syncStatus: SyncStatus = "not_connected";
+	private syncPaused = false;
 	private orchestrator!: SyncOrchestrator;
 	private scheduler!: SyncScheduler;
 	private localTracker!: LocalChangeTracker;
@@ -59,6 +64,7 @@ export default class AirSyncPlugin extends Plugin {
 	private settingsWereAbsent = false;
 
 	async onload() {
+		this.clientId = await resolveClientId(this.instanceStore);
 		await this.loadSettings();
 
 		const secretStore: ISecretStore = {
@@ -69,13 +75,13 @@ export default class AirSyncPlugin extends Plugin {
 
 		this.localFs = new LocalFs(this.app, () => this.settings.syncDotPaths);
 
-		const deviceName = getDeviceName(Platform.isMobile, this.settings.vaultId);
+		const deviceName = getDeviceName(Platform.isMobile, this.clientId);
 		this.logger = new Logger(
 			this.app.vault.adapter as unknown as LoggerAdapter,
 			() => this.settings,
 			deviceName,
 		);
-		this.logger.info("Plugin loaded", { deviceName, vaultId: this.settings.vaultId });
+		this.logger.info("Plugin loaded", { deviceName, vaultName: this.app.vault.getName() });
 
 		this.backendManager = new BackendManager({
 			getSettings: () => this.settings,
@@ -114,6 +120,7 @@ export default class AirSyncPlugin extends Plugin {
 
 		this.orchestrator = new SyncOrchestrator({
 			getSettings: () => this.settings,
+			getVaultName: () => this.app.vault.getName(),
 			saveSettings: () => this.saveSettings(),
 			localFs: () => this.localFs,
 			remoteFs: () => this.backendManager.getRemoteFs(),
@@ -132,6 +139,20 @@ export default class AirSyncPlugin extends Plugin {
 			localTracker: this.localTracker,
 			logger: this.logger,
 			isBackendConnecting: () => this.backendManager.isConnecting(),
+			isPaused: () => this.syncPaused,
+			clientId: this.clientId,
+			getLocalSignature: async () => {
+				const stored = await this.instanceStore.load(this.vaultKey);
+				return stored.lastSyncSignature;
+			},
+			saveLocalSignature: async (sig: string) => {
+				await this.instanceStore.save(
+					this.vaultKey,
+					extractInstance(this.settings, this.vaultPath, sig),
+				);
+			},
+			confirmDestructiveSync: (count, total) =>
+				DestructiveSyncModal.prompt(this.app, count, total),
 		});
 
 		this.scheduler = new SyncScheduler({
@@ -189,6 +210,15 @@ export default class AirSyncPlugin extends Plugin {
 			},
 		});
 
+		this.addCommand({
+			id: "toggle-sync-pause",
+			name: "Pause sync",
+			callback: () => {
+				this.syncPaused = !this.syncPaused;
+				new Notice(this.syncPaused ? "Air Sync: sync paused" : "Air Sync: sync resumed");
+			},
+		});
+
 		// Ribbon icon
 		this.addRibbonIcon("cloud", "Sync now", () => {
 			void this.runSync();
@@ -213,17 +243,13 @@ export default class AirSyncPlugin extends Plugin {
 	}
 
 	private get vaultKey(): string {
-		const vault = this.app.vault;
-		// FileSystemAdapter (desktop only) exposes getBasePath() — the absolute
-		// path to the vault root. This uniquely identifies the vault even when
-		// two vaults share the same name in the same Obsidian installation.
-		// On mobile the adapter doesn't have getBasePath(); fall back to name+configDir
-		// (acceptable because mobile Obsidian only opens one vault at a time).
-		const fsAdapter = vault.adapter as unknown as { getBasePath?: () => string };
-		const basePath = typeof fsAdapter.getBasePath === "function"
-			? fsAdapter.getBasePath()
-			: undefined;
-		return vaultInstanceKey(vault.getName(), vault.configDir, basePath);
+		return vaultInstanceKey(this.app.vault.getName());
+	}
+
+	/** Absolute vault path on desktop; empty string on mobile. */
+	private get vaultPath(): string {
+		const fsAdapter = this.app.vault.adapter as unknown as { getBasePath?: () => string };
+		return typeof fsAdapter.getBasePath === "function" ? fsAdapter.getBasePath() : "";
 	}
 
 	async loadSettings() {
@@ -232,26 +258,21 @@ export default class AirSyncPlugin extends Plugin {
 		const diskData = (rawDiskData ?? {}) as Partial<AirSyncSettings>;
 		const instanceData = await this.instanceStore.load(this.vaultKey);
 
-		// Bootstrap: if InstanceStore is empty (first run after upgrade to this version),
-		// carry over instance fields from settings.json to avoid losing user preferences
-		// and to preserve vaultId so the MetadataStore cache key stays valid.
-		if (!instanceData.vaultId) {
-			instanceData.vaultId = diskData.vaultId || crypto.randomUUID();
-			instanceData.enableLogging = diskData.enableLogging ?? DEFAULT_INSTANCE_SETTINGS.enableLogging;
-			instanceData.logLevel = diskData.logLevel ?? DEFAULT_INSTANCE_SETTINGS.logLevel;
-			for (const [type, data] of Object.entries(diskData.backendData ?? {})) {
-				if (typeof data.accessTokenExpiry === "number") {
-					instanceData.backendInstance[type] = { accessTokenExpiry: data.accessTokenExpiry };
-				}
-			}
-			await this.instanceStore.save(this.vaultKey, instanceData);
+		// Vault-path collision guard: detect two vaults with the same name but different paths.
+		const currentPath = this.vaultPath;
+		if (instanceData.vaultPath && currentPath && instanceData.vaultPath !== currentPath) {
+			const msg =
+				`Air Sync: vault name collision detected. ` +
+				`This vault is at "${currentPath}" but the name "${this.app.vault.getName()}" ` +
+				`was previously used by a vault at "${instanceData.vaultPath}". ` +
+				`Rename one of the vaults to resolve the conflict. Plugin will not initialize.`;
+			throw new Error(msg);
 		}
 
 		this.settings = {
 			...DEFAULT_SETTINGS,
 			...diskData,
 			// Instance fields always win over anything in settings.json
-			vaultId: instanceData.vaultId,
 			enableLogging: instanceData.enableLogging,
 			logLevel: instanceData.logLevel,
 			backendData: mergeBackendInstance(
@@ -272,7 +293,11 @@ export default class AirSyncPlugin extends Plugin {
 
 	async saveSettings() {
 		await this.saveData(toSyncable(this.settings));
-		await this.instanceStore.save(this.vaultKey, extractInstance(this.settings));
+		const stored = await this.instanceStore.load(this.vaultKey);
+		await this.instanceStore.save(
+			this.vaultKey,
+			extractInstance(this.settings, this.vaultPath, stored.lastSyncSignature),
+		);
 	}
 
 	async runSync(): Promise<void> {
@@ -295,6 +320,27 @@ export default class AirSyncPlugin extends Plugin {
 			new Notice(`Sync error: ${msg}`);
 			this.logger.error("Unhandled sync error", { error: msg });
 		}
+	}
+
+	/** Clear all local sync history and the cached signature (forces full sync next time). */
+	async clearSyncHistory(): Promise<void> {
+		await this.instanceStore.save(
+			this.vaultKey,
+			extractInstance(this.settings, this.vaultPath, "0"),
+		);
+		await this.orchestrator.clearSyncState();
+	}
+
+	/** True when the client ID is a generated UUID (user-editable), false when it is a hostname (read-only). */
+	get isClientIdEditable(): boolean {
+		return this.clientId.startsWith("Client_");
+	}
+
+	/** Update the client ID (only valid when isClientIdEditable is true). Clears sync history. */
+	async updateClientId(newId: string): Promise<void> {
+		await this.instanceStore.saveDevice({ clientId: newId });
+		this.clientId = newId;
+		await this.clearSyncHistory();
 	}
 
 	private updateStatusBar(): void {

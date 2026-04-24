@@ -1,5 +1,5 @@
 import type { App } from "obsidian";
-import { Notice, SecretComponent, Setting } from "obsidian";
+import { SecretComponent, Setting } from "obsidian";
 import type { AirSyncSettings } from "../settings";
 import type {
 	BackendConnectionActions,
@@ -58,14 +58,14 @@ export class GoogleDriveSettingsRenderer implements IBackendSettingsRenderer {
 					})
 			);
 
-		// Show remote vault folder ID when connected (read-only)
-		if (isConnected && data.remoteVaultFolderId) {
+		// Show remote vault folder name when connected (read-only)
+		if (isConnected && data.remoteVaultFolder) {
 			new Setting(containerEl)
 				.setName("Remote vault folder")
 				.setDesc("Automatically managed folder in Google Drive")
 				.addText((text) =>
 					text
-						.setValue(data.remoteVaultFolderId ?? "")
+						.setValue(data.remoteVaultFolder ?? "")
 						.setDisabled(true)
 				);
 		}
@@ -147,18 +147,17 @@ export class GoogleDriveCustomSettingsRenderer implements IBackendSettingsRender
 					})
 			);
 
-		new Setting(containerEl)
-			.setName("Remote vault folder ID")
-			.setDesc("Folder ID to sync with")
-			.addText((text) =>
-				text
-					.setPlaceholder("...")
-					.setValue(data.remoteVaultFolderId ?? "")
-					.setDisabled(isConnected)
-					.onChange(async (value) => {
-						await onSave({ remoteVaultFolderId: value.trim() });
-					})
-			);
+		// Show remote vault folder name when connected (read-only, derived from vault name)
+		if (isConnected && data.remoteVaultFolder) {
+			new Setting(containerEl)
+				.setName("Remote vault folder")
+				.setDesc("Folder name in Google Drive, derived from vault name")
+				.addText((text) =>
+					text
+						.setValue(data.remoteVaultFolder ?? "")
+						.setDisabled(true)
+				);
+		}
 
 		let statusDesc: string;
 		let statusClass: string;
@@ -183,11 +182,6 @@ export class GoogleDriveCustomSettingsRenderer implements IBackendSettingsRender
 						if (isConnected) {
 							await actions.disconnect();
 						} else {
-							const current = (settings.backendData["googledrive-custom"] ?? {}) as Partial<GoogleDriveCustomBackendData>;
-							if (!current.remoteVaultFolderId) {
-								new Notice("Enter a remote vault folder ID first");
-								return;
-							}
 							await actions.startAuth();
 						}
 						actions.refreshDisplay();

@@ -19,7 +19,6 @@ let fakeFs: IFileSystem;
 
 function mockSettings(overrides: Partial<AirSyncSettings> = {}): AirSyncSettings {
 	return {
-		vaultId: "test-vault",
 		backendType: "test",
 		ignorePatterns: [],
 		syncDotPaths: [],
@@ -217,11 +216,11 @@ describe("BackendManager — auth error notification on initBackend", () => {
 });
 
 describe("BackendManager — isConnected false with prior connection", () => {
-	it("notifies when isConnected is false but remoteVaultFolderId exists", async () => {
+	it("notifies when isConnected is false but remoteVaultFolder exists", async () => {
 		fakeProvider.isConnected = () => false;
 
 		const settings = mockSettings({
-			backendData: { test: { remoteVaultFolderId: "folder-123" } },
+			backendData: { test: { remoteVaultFolder: "my-vault" } },
 		});
 		const deps = createDeps(settings);
 		const mgr = new BackendManager(deps);
@@ -269,7 +268,7 @@ describe("BackendManager — isConnecting flag", () => {
 		fakeProvider.resolveRemoteVault = async () => {
 			connectingDuringInit = mgr.isConnecting();
 			await blocker;
-			return { backendUpdates: {}, wasCreated: false };
+			return { backendUpdates: { remoteVaultFolder: "" }, wasCreated: false };
 		};
 
 		const initPromise = mgr.initBackend();
@@ -316,7 +315,7 @@ describe("BackendManager — isConnecting flag", () => {
 
 		fakeProvider.resolveRemoteVault = async () => {
 			await blocker;
-			return { backendUpdates: {}, wasCreated: false };
+			return { backendUpdates: { remoteVaultFolder: "" }, wasCreated: false };
 		};
 
 		const first = mgr.initBackend();
@@ -392,7 +391,7 @@ describe("BackendManager — isConnecting flag", () => {
 		await mgr.initBackend();
 
 		fakeProvider.auth.completeAuth = () => Promise.resolve({});
-		fakeProvider.resolveRemoteVault = () => Promise.resolve({ backendUpdates: {}, wasCreated: true });
+		fakeProvider.resolveRemoteVault = () => Promise.resolve({ backendUpdates: { remoteVaultFolder: "" }, wasCreated: true });
 
 		await mgr.completeBackendConnect("auth-code");
 
@@ -411,7 +410,7 @@ describe("BackendManager — isConnecting flag", () => {
 		await mgr.initBackend();
 
 		fakeProvider.auth.completeAuth = () => Promise.resolve({});
-		fakeProvider.resolveRemoteVault = () => Promise.resolve({ backendUpdates: {}, wasCreated: false });
+		fakeProvider.resolveRemoteVault = () => Promise.resolve({ backendUpdates: { remoteVaultFolder: "" }, wasCreated: false });
 
 		await mgr.completeBackendConnect("auth-code");
 
@@ -431,7 +430,7 @@ describe("BackendManager — isConnecting flag", () => {
 		await mgr.initBackend();
 
 		fakeProvider.auth.completeAuth = () => Promise.resolve({});
-		fakeProvider.resolveRemoteVault = () => Promise.resolve({ backendUpdates: {}, wasCreated: false });
+		fakeProvider.resolveRemoteVault = () => Promise.resolve({ backendUpdates: { remoteVaultFolder: "" }, wasCreated: false });
 
 		await mgr.completeBackendConnect("auth-code");
 
@@ -453,7 +452,7 @@ describe("BackendManager — isConnecting flag", () => {
 		await mgr.initBackend();
 
 		fakeProvider.auth.completeAuth = () => Promise.resolve({});
-		fakeProvider.resolveRemoteVault = () => Promise.resolve({ backendUpdates: {}, wasCreated: false });
+		fakeProvider.resolveRemoteVault = () => Promise.resolve({ backendUpdates: { remoteVaultFolder: "" }, wasCreated: false });
 
 		await mgr.completeBackendConnect("auth-code");
 
@@ -472,7 +471,7 @@ describe("BackendManager — isConnecting flag", () => {
 		await mgr.initBackend();
 
 		fakeProvider.auth.completeAuth = () => Promise.resolve({});
-		fakeProvider.resolveRemoteVault = () => Promise.resolve({ backendUpdates: {}, wasCreated: false });
+		fakeProvider.resolveRemoteVault = () => Promise.resolve({ backendUpdates: { remoteVaultFolder: "" }, wasCreated: false });
 		fakeProvider.disconnect = vi.fn().mockResolvedValue({});
 
 		await mgr.completeBackendConnect("auth-code");
@@ -492,7 +491,7 @@ describe("BackendManager — isConnecting flag", () => {
 		await mgr.initBackend();
 
 		fakeProvider.auth.completeAuth = () => Promise.resolve({});
-		fakeProvider.resolveRemoteVault = () => Promise.resolve({ backendUpdates: {}, wasCreated: false });
+		fakeProvider.resolveRemoteVault = () => Promise.resolve({ backendUpdates: { remoteVaultFolder: "" }, wasCreated: false });
 
 		await mgr.completeBackendConnect("auth-code");
 
@@ -511,7 +510,7 @@ describe("BackendManager — isConnecting flag", () => {
 
 		fakeProvider.resolveRemoteVault = async () => {
 			await blocker;
-			return { backendUpdates: {}, wasCreated: false };
+			return { backendUpdates: { remoteVaultFolder: "" }, wasCreated: false };
 		};
 
 		const initPromise = mgr.initBackend();

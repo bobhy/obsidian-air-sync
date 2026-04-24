@@ -158,6 +158,39 @@ export class AirSyncSettingTab extends PluginSettingTab {
 			);
 
 		new Setting(containerEl)
+			.setName("Client ID")
+			.setDesc(
+				this.plugin.isClientIdEditable
+					? "Device identifier used to store sync history in the remote vault. Changing this forces a full resync."
+					: "Device identifier (hostname) used to store sync history in the remote vault. Read-only on this platform.",
+			)
+			.addText((text) =>
+				text
+					.setValue(this.plugin.clientId)
+					.setDisabled(!this.plugin.isClientIdEditable)
+					.onChange(async (value) => {
+						if (this.plugin.isClientIdEditable && value.trim()) {
+							await this.plugin.updateClientId(value.trim());
+						}
+					})
+			);
+
+		new Setting(containerEl)
+			.setName("Delete cached sync history")
+			.setDesc(
+				"Clear the local sync state and signature. The next sync will be a full scan. " +
+				"Use this to recover from a corrupted sync state."
+			)
+			.addButton((button) =>
+				button
+					.setButtonText("Clear sync history")
+					.setWarning()
+					.onClick(async () => {
+						await this.plugin.clearSyncHistory();
+					})
+			);
+
+		new Setting(containerEl)
 			.setName("Enable logging")
 			.setDesc(
 				"Write sync logs to .airsync/ in your vault for debugging."
