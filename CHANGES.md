@@ -5,6 +5,39 @@ All notable changes to this project will be documented in this file.
 The format is based on [Keep a Changelog](https://keepachangelog.com/en/1.1.0/),
 and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0.html).
 
+
+
+## [0.3.1] - 2026-04-26
+### Fixed
+- support the scenario of multiple clients running on same device, 
+  syncing to the same remote folder using the same local vault name
+  but different local paths to the vault.  
+  Client name now `<hostname>_<pathHash>` on non-mobile platforms (where hostname is available)
+  and `client_<deviceGuid>_<vaultGuid>` on mobile platforms (even though mobile may 
+  not support running multiple clients simultaneously)
+- added npm script to deploy newly-built plugin to local vault(s)  
+  `npm run deploy -- /path/to/vault1 /path/to/vault2`
+
+## [0.3.0] - 2026-04-25
+### Changed
+- remote vault folder rendezvous and sync session resumption  
+  Plugin looks for remote folder whose name matches current obsidian vault name.  
+  Doesn't depend on finding `.airsync/metadata.json` with correct `vaultName` key.
+- client now computes a hash over last synced files and operations and caches that 
+  locally and in the remote folder (in file `.airsync/<clientId>.json).  
+  When both signatures exist and actually match, client knows its safe to trust 
+  local sync history and resumes doing incremental syncs.  If signatures don't match, 
+  client does a full sync (and caches new sync signatures).  
+- changed handling of "too many" changes planned in a sync operation  
+  Added a modal dialog asking for explicit user OK before doing a sync that would delete or modify 
+  "too many" local files (settable, default is 10%).  If user decides not to allow, the current sync
+  operation is aborted, but the next regular sync cycle may retrigger it.  
+- changed settings to display the remote actual folder name and client id used to identify this instance.
+
+### Added
+- plugin command to toggle sync processing.  User can now pause and later resume scheduled sync operations 
+  (e.g to deal with "too many changes" popups).
+
 ## [0.2.1] - 2026-04-08
 
 ### Changed
@@ -18,7 +51,7 @@ and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0
   accidental deletion of the metadata file.
 - A name mismatch between the local vault and `metadata.json` still shows an error modal and
   aborts the connection, unchanged from 0.2.0.
-
+  
 ## [0.2.0] - 2026-03-29
 
 ### Changed

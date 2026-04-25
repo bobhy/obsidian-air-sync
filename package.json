@@ -1,6 +1,6 @@
 {
 	"name": "obsidian-air-sync",
-	"version": "0.3.0",
+	"version": "0.3.1",
 	"description": "Sync your Obsidian vault bidirectionally with Google Drive.",
 	"main": "main.js",
 	"type": "module",
@@ -10,7 +10,8 @@
 		"version": "node version-bump.mjs && git add manifest.json versions.json",
 		"lint": "eslint --max-warnings 0 .",
 		"test": "vitest run",
-		"test:watch": "vitest"
+		"test:watch": "vitest",
+		"deploy": "node esbuild.config.mjs production && node deploy.mjs"
 	},
 	"keywords": [],
 	"license": "MIT",
