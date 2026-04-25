@@ -28,6 +28,7 @@ function mockSettings(overrides: Partial<AirSyncSettings> = {}): AirSyncSettings
 		enableLogging: false,
 		logLevel: "info",
 		backendData: {},
+		destructiveSyncThreshold: 10,
 		...overrides,
 	};
 }

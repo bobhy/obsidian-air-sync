@@ -1,30 +1,33 @@
 import { App, Modal } from "obsidian";
 
 /**
- * Shown when a sync plan would delete or overwrite more than 10% of locally
- * known files. User must confirm before any changes are applied.
+ * Shown when a sync plan would delete or overwrite more than the user's configured
+ * threshold percentage of locally known files.
  */
 export class DestructiveSyncModal extends Modal {
 	private readonly destructiveCount: number;
 	private readonly knownFileCount: number;
+	private readonly threshold: number;
 	private readonly onResult: (confirmed: boolean) => void;
 
 	private constructor(
 		app: App,
 		destructiveCount: number,
 		knownFileCount: number,
+		threshold: number,
 		onResult: (confirmed: boolean) => void,
 	) {
 		super(app);
 		this.destructiveCount = destructiveCount;
 		this.knownFileCount = knownFileCount;
+		this.threshold = threshold;
 		this.onResult = onResult;
 	}
 
 	/** Show the modal and resolve with true (proceed) or false (skip). */
-	static prompt(app: App, destructiveCount: number, knownFileCount: number): Promise<boolean> {
+	static prompt(app: App, destructiveCount: number, knownFileCount: number, threshold: number): Promise<boolean> {
 		return new Promise((resolve) => {
-			new DestructiveSyncModal(app, destructiveCount, knownFileCount, resolve).open();
+			new DestructiveSyncModal(app, destructiveCount, knownFileCount, threshold, resolve).open();
 		});
 	}
 
@@ -37,7 +40,7 @@ export class DestructiveSyncModal extends Modal {
 			text:
 				`This sync would delete or overwrite ${this.destructiveCount} of ` +
 				`${this.knownFileCount} tracked files (${pct}%). ` +
-				`This is more than 10% of your vault.`,
+				`This exceeds your ${this.threshold}% destructive sync threshold.`,
 		});
 		contentEl.createEl("p", {
 			text: "Proceed with the sync, or skip this cycle and review manually?",

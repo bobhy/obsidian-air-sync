@@ -18,6 +18,7 @@ function mockSettings() {
 		enableLogging: false,
 		logLevel: "info" as const,
 		backendData: {} as Record<string, Record<string, unknown>>,
+		destructiveSyncThreshold: 10,
 	};
 }
 
@@ -572,7 +573,7 @@ describe("SyncOrchestrator", () => {
 		});
 	});
 
-	describe("10% destructive-sync guard", () => {
+	describe("destructive-sync guard", () => {
 		// "content X" is 9 bytes — localSize must match so hasChanged() returns false → delete_local (not conflict)
 		function makeRecord(path: string): SyncRecord {
 			return { path, hash: "", localMtime: 1000, remoteMtime: 1000, localSize: 9, remoteSize: 9, syncedAt: 1000 };
@@ -635,7 +636,7 @@ describe("SyncOrchestrator", () => {
 			await orchestrator.close();
 		});
 
-		it("does not invoke guard when plan is below 10% threshold", async () => {
+		it("does not invoke guard when plan is below configured threshold", async () => {
 			const localFs = createMockFs("local");
 			const remoteFs = createMockFs("remote");
 			const confirmDestructiveSync = vi.fn().mockResolvedValue(false);

@@ -4,7 +4,7 @@ import type { SyncPlan } from "./types";
 import { createMockFs, addFile } from "../__mocks__/sync-test-helpers";
 
 function makePlan(actions: SyncPlan["actions"]): SyncPlan {
-	return { actions, safetyCheck: { shouldAbort: false, requiresConfirmation: false } };
+	return { actions };
 }
 
 describe("computeSignature", () => {

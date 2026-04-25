@@ -68,11 +68,11 @@ export interface SyncOrchestratorDeps {
 	getLocalSignature: () => Promise<string>;
 	saveLocalSignature: (sig: string) => Promise<void>;
 	/**
-	 * Called when a sync plan would affect more than 10% of tracked files.
+	 * Called when a sync plan exceeds the destructiveSyncThreshold setting.
 	 * Resolves to true to proceed, false to skip the sync cycle.
 	 * If absent, the sync proceeds without confirmation.
 	 */
-	confirmDestructiveSync?: (destructiveCount: number, knownFileCount: number) => Promise<boolean>;
+	confirmDestructiveSync?: (destructiveCount: number, knownFileCount: number, threshold: number) => Promise<boolean>;
 }
 
 const MAX_RETRIES = 3;
@@ -388,30 +388,26 @@ export class SyncOrchestrator {
 		this.deps.logger?.info("Sync plan created", {
 			total: plan.actions.length,
 			...actionBreakdown,
-			safetyCheck: plan.safetyCheck,
 		});
 
 		const total = plan.actions.length;
 
-		// 10% destructive-sync guard: count deletes + pulls of existing local files
-		let executablePlan = plan;
+		// Destructive-sync guard: prompt when deletes + overwrites exceed user's threshold
 		if (this.deps.confirmDestructiveSync) {
+			const threshold = settings.destructiveSyncThreshold;
 			const knownFileCount = (await this.stateStore.getAll()).length;
 			const destructiveCount = plan.actions.filter(
 				(a) => a.action === "delete_local" || (a.action === "pull" && a.local !== undefined),
 			).length;
-			if (knownFileCount > 0 && destructiveCount / knownFileCount > 0.1) {
-				const proceed = await this.deps.confirmDestructiveSync(destructiveCount, knownFileCount);
+			if (knownFileCount > 0 && destructiveCount / knownFileCount > threshold / 100) {
+				const proceed = await this.deps.confirmDestructiveSync(destructiveCount, knownFileCount, threshold);
 				if (!proceed) {
-					this.deps.logger?.info("Sync skipped by user — destructive plan exceeded 10% threshold", {
+					this.deps.logger?.info("Sync skipped by user — destructive plan exceeded threshold", {
 						destructiveCount,
 						knownFileCount,
+						threshold,
 					});
 					return { succeeded: [], failed: [], conflicts: [] };
-				}
-				// User confirmed — override the safety-abort check so executePlan proceeds
-				if (plan.safetyCheck.shouldAbort) {
-					executablePlan = { ...plan, safetyCheck: { ...plan.safetyCheck, shouldAbort: false } };
 				}
 			}
 		}
@@ -434,7 +430,7 @@ export class SyncOrchestrator {
 			logger: this.deps.logger,
 		};
 
-		const result = await executePlan(executablePlan, ctx);
+		const result = await executePlan(plan, ctx);
 
 		// Update sync signature after a fully successful sync
 		if (result.failed.length === 0) {

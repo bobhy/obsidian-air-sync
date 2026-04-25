@@ -21,6 +21,12 @@ export interface AirSyncSettings {
 
 	/** Backend-specific data, keyed by backend type (e.g. "googledrive") */
 	backendData: Record<string, Record<string, unknown>>;
+
+	/**
+	 * Prompt before syncing when this percentage (0–100) of tracked files would be deleted
+	 * or overwritten. Set to 100 to disable. Per-device, not synced.
+	 */
+	destructiveSyncThreshold: number;
 }
 
 export const DEFAULT_SETTINGS: AirSyncSettings = {
@@ -33,6 +39,7 @@ export const DEFAULT_SETTINGS: AirSyncSettings = {
 	enableLogging: false,
 	logLevel: "info",
 	backendData: {},
+	destructiveSyncThreshold: 10,
 };
 
 /**
@@ -40,7 +47,7 @@ export const DEFAULT_SETTINGS: AirSyncSettings = {
  * AirSyncSettings serves as the single in-memory runtime type to avoid touching every
  * call site; SyncableSettings is only used at the persistence boundary (saveData).
  */
-export type SyncableSettings = Omit<AirSyncSettings, "enableLogging" | "logLevel">;
+export type SyncableSettings = Omit<AirSyncSettings, "enableLogging" | "logLevel" | "destructiveSyncThreshold">;
 
 /** Backend fields that are per-device — stripped from backendData before writing to settings.json */
 const INSTANCE_BACKEND_KEYS = [

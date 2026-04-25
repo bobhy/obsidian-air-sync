@@ -151,8 +151,8 @@ export default class AirSyncPlugin extends Plugin {
 					extractInstance(this.settings, this.vaultPath, sig),
 				);
 			},
-			confirmDestructiveSync: (count, total) =>
-				DestructiveSyncModal.prompt(this.app, count, total),
+			confirmDestructiveSync: (count, total, threshold) =>
+				DestructiveSyncModal.prompt(this.app, count, total, threshold),
 		});
 
 		this.scheduler = new SyncScheduler({

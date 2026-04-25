@@ -158,6 +158,24 @@ export class AirSyncSettingTab extends PluginSettingTab {
 			);
 
 		new Setting(containerEl)
+			.setName("Destructive sync threshold (%)")
+			.setDesc(
+				"Prompt for confirmation when a sync would delete or overwrite more than this percentage of tracked files. Set to 100 to disable.",
+			)
+			.addText((text) =>
+				text
+					.setPlaceholder("10")
+					.setValue(String(this.plugin.settings.destructiveSyncThreshold))
+					.onChange(async (value) => {
+						const num = parseInt(value, 10);
+						if (!isNaN(num) && num >= 0 && num <= 100) {
+							this.plugin.settings.destructiveSyncThreshold = num;
+							await this.plugin.saveSettings();
+						}
+					})
+			);
+
+		new Setting(containerEl)
 			.setName("Client ID")
 			.setDesc(
 				this.plugin.isClientIdEditable

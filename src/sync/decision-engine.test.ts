@@ -31,7 +31,6 @@ describe("planSync", () => {
 	it("returns empty plan for empty input", () => {
 		const plan = planSync([]);
 		expect(plan.actions).toHaveLength(0);
-		expect(plan.safetyCheck.shouldAbort).toBe(false);
 	});
 
 	it("push: local created, no remote, no baseline", () => {
@@ -200,17 +199,6 @@ describe("planSync", () => {
 		const entries: MixedEntity[] = [{ path: "ghost.md" }];
 		const plan = planSync(entries);
 		expect(plan.actions).toHaveLength(0);
-	});
-
-	it("populates safetyCheck via checkSafety", () => {
-		const entries: MixedEntity[] = Array.from({ length: 5 }, (_, i) => ({
-			path: `file-${i}.md`,
-			remote: makeFile({ path: `file-${i}.md`, mtime: 1000 }),
-			prevSync: makeRecord({ path: `file-${i}.md` }),
-		}));
-		const plan = planSync(entries);
-		expect(plan.actions.every((a) => a.action === "delete_remote")).toBe(true);
-		expect(plan.safetyCheck.shouldAbort).toBe(true);
 	});
 
 	it("action includes local, remote and baseline references", () => {
