@@ -1,11 +1,10 @@
-import { describe, it, expect, vi, beforeEach } from "vitest";
+import { describe, it, expect, vi, beforeEach, afterEach } from "vitest";
 import "fake-indexeddb/auto";
 import { resolveClientId } from "./client-id";
 import type { InstanceStore } from "./instance-store";
 
-// Control os.hostname() behavior per test
-const hostnameImpl = vi.hoisted(() => vi.fn<() => string>(() => "test-host"));
-vi.mock("os", () => ({ hostname: hostnameImpl }));
+// Simulate Electron's window.require("os") returning a controllable hostname
+const hostnameImpl = vi.fn<() => string>(() => "test-host");
 
 function makeStore(clientId = ""): {
 	store: InstanceStore;
@@ -18,13 +17,25 @@ function makeStore(clientId = ""): {
 	return { store, loadDevice, saveDevice };
 }
 
+type GlobalWithRequire = { require?: (id: string) => unknown };
+
 describe("resolveClientId", () => {
 	beforeEach(() => {
 		vi.clearAllMocks();
+		delete process.env.HOSTNAME;
+		(globalThis as unknown as GlobalWithRequire).require = (id: string) => {
+			if (id === "os") return { hostname: hostnameImpl };
+			throw new Error(`Unexpected require: ${id}`);
+		};
+	});
+
+	afterEach(() => {
+		delete process.env.HOSTNAME;
+		delete (globalThis as unknown as GlobalWithRequire).require;
 	});
 
 	describe("desktop (hostname available)", () => {
-		it("returns sanitized hostname", async () => {
+		it("returns sanitized hostname via window.require", async () => {
 			hostnameImpl.mockReturnValue("my-computer");
 			const { store, loadDevice } = makeStore();
 			const result = await resolveClientId(store);
@@ -37,6 +48,15 @@ describe("resolveClientId", () => {
 			const { store } = makeStore();
 			const result = await resolveClientId(store);
 			expect(result).toBe("My_Computer_");
+		});
+
+		it("prefers HOSTNAME env var over window.require", async () => {
+			process.env.HOSTNAME = "env-host";
+			hostnameImpl.mockReturnValue("other-host");
+			const { store } = makeStore();
+			const result = await resolveClientId(store);
+			expect(result).toBe("env-host");
+			expect(hostnameImpl).not.toHaveBeenCalled();
 		});
 	});
 
@@ -58,6 +78,13 @@ describe("resolveClientId", () => {
 			const result = await resolveClientId(store);
 			expect(result).toBe("Client_generated-uuid");
 			expect(saveDevice).toHaveBeenCalledWith({ clientId: "Client_generated-uuid" });
+		});
+
+		it("falls back to UUID path when window.require is unavailable", async () => {
+			delete (globalThis as unknown as GlobalWithRequire).require;
+			const { store } = makeStore("Client_fallback");
+			const result = await resolveClientId(store);
+			expect(result).toBe("Client_fallback");
 		});
 
 		it("falls back to UUID path when os.hostname throws", async () => {

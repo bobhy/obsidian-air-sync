@@ -10,7 +10,7 @@ import type { InstanceStore } from "./instance-store";
  * instances on the same device share the same ID.
  */
 export async function resolveClientId(instanceStore: InstanceStore): Promise<string> {
-	const hostname = await tryGetHostname();
+	const hostname = tryGetHostname();
 	if (hostname) return sanitizeDbName(hostname);
 
 	const device = await instanceStore.loadDevice();
@@ -21,12 +21,16 @@ export async function resolveClientId(instanceStore: InstanceStore): Promise<str
 	return generated;
 }
 
-async function tryGetHostname(): Promise<string | null> {
+function tryGetHostname(): string | null {
+	// process.env.HOSTNAME is set by most Linux shells and available in Electron.
+	if (process.env.HOSTNAME) return process.env.HOSTNAME;
+
+	// Electron exposes require on the global object; more reliable than dynamic import()
+	// in the renderer process. Not typed in ESM, so we access it via globalThis/unknown.
 	try {
-		// eslint-disable-next-line import/no-nodejs-modules -- intentional: Electron-only, mobile throws and we fall back to UUID
-		const os = await import("os");
-		const name = os.hostname();
-		return name || null;
+		const g = globalThis as unknown as { require?: (id: string) => unknown };
+		const os = g.require?.("os") as { hostname?: () => string } | undefined;
+		return os?.hostname?.() ?? null;
 	} catch {
 		return null;
 	}

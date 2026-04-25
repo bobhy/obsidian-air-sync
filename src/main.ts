@@ -258,15 +258,15 @@ export default class AirSyncPlugin extends Plugin {
 		const diskData = (rawDiskData ?? {}) as Partial<AirSyncSettings>;
 		const instanceData = await this.instanceStore.load(this.vaultKey);
 
-		// Vault-path collision guard: detect two vaults with the same name but different paths.
+		// Vault-path collision guard: warn when two vaults share the same name but live at different paths.
 		const currentPath = this.vaultPath;
 		if (instanceData.vaultPath && currentPath && instanceData.vaultPath !== currentPath) {
-			const msg =
-				`Air Sync: vault name collision detected. ` +
-				`This vault is at "${currentPath}" but the name "${this.app.vault.getName()}" ` +
-				`was previously used by a vault at "${instanceData.vaultPath}". ` +
-				`Rename one of the vaults to resolve the conflict. Plugin will not initialize.`;
-			throw new Error(msg);
+			new Notice(
+				`Air Sync: multiple vaults configured with same name at different file paths. ` +
+				`All will sync to the same remote folder. ` +
+				`The plugin supports this configuration, but it may not be what you wanted.`,
+				10_000,
+			);
 		}
 
 		this.settings = {
