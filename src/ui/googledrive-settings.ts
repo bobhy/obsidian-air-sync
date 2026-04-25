@@ -9,6 +9,7 @@ import type { GoogleDriveBackendData } from "../fs/googledrive/provider";
 import type { GoogleDriveCustomBackendData } from "../fs/googledrive/provider-custom";
 import { DEFAULT_CUSTOM_SCOPE, DEFAULT_CUSTOM_REDIRECT_URI } from "../fs/googledrive/auth";
 import { getBackendProvider } from "../fs/registry";
+import { sanitizeDbName } from "../store/idb-helper";
 
 /**
  * Renders Google Drive-specific settings UI:
@@ -22,7 +23,7 @@ export class GoogleDriveSettingsRenderer implements IBackendSettingsRenderer {
 		settings: AirSyncSettings,
 		_onSave: (updates: Record<string, unknown>) => Promise<void>,
 		actions: BackendConnectionActions,
-		_app: App,
+		app: App,
 	): void {
 		const data = (settings.backendData["googledrive"] ?? {}) as Partial<GoogleDriveBackendData>;
 
@@ -65,7 +66,7 @@ export class GoogleDriveSettingsRenderer implements IBackendSettingsRenderer {
 				.setDesc("Automatically managed folder in Google Drive")
 				.addText((text) =>
 					text
-						.setValue(data.remoteVaultFolder ?? "")
+						.setValue(sanitizeDbName(app.vault.getName()))
 						.setDisabled(true)
 				);
 		}
@@ -154,7 +155,7 @@ export class GoogleDriveCustomSettingsRenderer implements IBackendSettingsRender
 				.setDesc("Folder name in Google Drive, derived from vault name")
 				.addText((text) =>
 					text
-						.setValue(data.remoteVaultFolder ?? "")
+						.setValue(sanitizeDbName(app.vault.getName()))
 						.setDisabled(true)
 				);
 		}
