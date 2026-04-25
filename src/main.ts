@@ -64,7 +64,7 @@ export default class AirSyncPlugin extends Plugin {
 	private settingsWereAbsent = false;
 
 	async onload() {
-		this.clientId = await resolveClientId(this.instanceStore);
+		this.clientId = await resolveClientId(this.instanceStore, this.vaultKey, this.vaultPath);
 		await this.loadSettings();
 
 		const secretStore: ISecretStore = {

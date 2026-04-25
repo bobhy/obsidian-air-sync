@@ -27,6 +27,11 @@ export interface DeviceRecord {
 	clientId: string;
 }
 
+/** Per-vault record stored at key "__vault__<vaultKey>" — mobile vault UUID, not synced */
+export interface VaultRecord {
+	vaultId: string;
+}
+
 const DEVICE_KEY = "__device__";
 
 const STORE_NAME = "settings";
@@ -92,6 +97,27 @@ export class InstanceStore {
 	async saveDevice(record: DeviceRecord): Promise<void> {
 		await this.idb.runTransaction(STORE_NAME, "readwrite", (tx) => {
 			tx.objectStore(STORE_NAME).put(record, DEVICE_KEY);
+			return () => undefined;
+		});
+	}
+
+	async loadVaultRecord(vaultKey: string): Promise<VaultRecord> {
+		const key = `__vault__${vaultKey}`;
+		try {
+			const result = await this.idb.runTransaction(STORE_NAME, "readonly", (tx) => {
+				const req = tx.objectStore(STORE_NAME).get(key);
+				return () => req.result as VaultRecord | undefined;
+			});
+			return result ?? { vaultId: "" };
+		} catch {
+			return { vaultId: "" };
+		}
+	}
+
+	async saveVaultRecord(vaultKey: string, record: VaultRecord): Promise<void> {
+		const key = `__vault__${vaultKey}`;
+		await this.idb.runTransaction(STORE_NAME, "readwrite", (tx) => {
+			tx.objectStore(STORE_NAME).put(record, key);
 			return () => undefined;
 		});
 	}

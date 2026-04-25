@@ -2,14 +2,27 @@ import { sanitizeDbName } from "./idb-helper";
 import type { InstanceStore } from "./instance-store";
 
 /**
- * Resolve the client ID for this device.
+ * Resolve the client ID for this device+vault combination.
  *
- * On Electron desktop, uses the OS hostname (stable, human-readable).
- * On mobile or when the hostname API is unavailable, falls back to a UUID
- * persisted at the fixed key "__device__" in InstanceStore so all vault
- * instances on the same device share the same ID.
+ * Format:
+ *   Desktop (hostname available):  <hostname>_<vaultSuffix>
+ *   Mobile / no hostname:          Client_<deviceUUID>_<vaultSuffix>
+ *
+ * vaultSuffix:
+ *   Desktop (vaultPath non-empty): first 8 hex chars of SHA-256(vaultPath)
+ *   Mobile  (vaultPath empty):     UUID stored per-vault in IDB
  */
-export async function resolveClientId(instanceStore: InstanceStore): Promise<string> {
+export async function resolveClientId(
+	instanceStore: InstanceStore,
+	vaultKey: string,
+	vaultPath: string,
+): Promise<string> {
+	const deviceId = await resolveDeviceId(instanceStore);
+	const suffix = await resolveVaultSuffix(instanceStore, vaultKey, vaultPath);
+	return `${deviceId}_${suffix}`;
+}
+
+async function resolveDeviceId(instanceStore: InstanceStore): Promise<string> {
 	const hostname = tryGetHostname();
 	if (hostname) return sanitizeDbName(hostname);
 
@@ -21,12 +34,33 @@ export async function resolveClientId(instanceStore: InstanceStore): Promise<str
 	return generated;
 }
 
+async function resolveVaultSuffix(
+	instanceStore: InstanceStore,
+	vaultKey: string,
+	vaultPath: string,
+): Promise<string> {
+	if (vaultPath) return shortHash(vaultPath);
+
+	const vault = await instanceStore.loadVaultRecord(vaultKey);
+	if (vault.vaultId) return vault.vaultId;
+
+	const generated = crypto.randomUUID();
+	await instanceStore.saveVaultRecord(vaultKey, { vaultId: generated });
+	return generated;
+}
+
+async function shortHash(input: string): Promise<string> {
+	const encoded = new TextEncoder().encode(input);
+	const buf = await crypto.subtle.digest("SHA-256", encoded);
+	return Array.from(new Uint8Array(buf))
+		.slice(0, 4)
+		.map((b) => b.toString(16).padStart(2, "0"))
+		.join("");
+}
+
 function tryGetHostname(): string | null {
-	// process.env.HOSTNAME is set by most Linux shells and available in Electron.
 	if (process.env.HOSTNAME) return process.env.HOSTNAME;
 
-	// Electron exposes require on the global object; more reliable than dynamic import()
-	// in the renderer process. Not typed in ESM, so we access it via globalThis/unknown.
 	try {
 		const g = globalThis as unknown as { require?: (id: string) => unknown };
 		const os = g.require?.("os") as { hostname?: () => string } | undefined;
