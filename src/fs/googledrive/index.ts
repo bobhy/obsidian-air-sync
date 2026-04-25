@@ -342,7 +342,10 @@ export class GoogleDriveFs implements IFileSystem {
 				r.fileName, r.parentId, content, "application/octet-stream", r.existingId, mtime
 			),
 			staleGuard: (r) => ({ path, expectedId: r.existingId }),
-			update: (_r, result) => { this.cache.setFile(path, result); },
+			update: (_r, result) => {
+				this.cache.setFile(path, result);
+				void this.metadataStore?.putFiles([{ path, file: result, isFolder: false }]);
+			},
 		});
 
 		const hash = await sha256(content);
