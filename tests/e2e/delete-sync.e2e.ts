@@ -2,12 +2,13 @@ import { describe, it, expect, beforeAll } from "vitest";
 import { rm } from "node:fs/promises";
 import { join } from "node:path";
 import { VAULT_NAME, VAULT_PATH } from "./helpers/env.js";
-import { createNote } from "./helpers/cli.js";
+import { openVault, createNote } from "./helpers/cli.js";
 import { resolveVaultFolder, pollForFile, pollForFileGone } from "./helpers/gdrive.js";
 
 let vaultFolderId: string;
 
 beforeAll(async () => {
+	await openVault();
 	vaultFolderId = await resolveVaultFolder(VAULT_NAME);
 });
 

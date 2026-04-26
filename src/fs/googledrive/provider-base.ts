@@ -237,10 +237,14 @@ export abstract class GoogleDriveProviderBase implements IBackendProvider {
 		const client = new DriveClient((force) => googleAuth.getAccessToken(force), logger);
 		// Use the user's custom folder name when set; fall back to the vault name.
 		const effectiveName = data.remoteVaultFolderName || vaultName;
-		return resolveGDriveRemoteVault(client, effectiveName, logger, {
+		const result = await resolveGDriveRemoteVault(client, effectiveName, logger, {
 			notify: (message) => new Notice(message, 10_000),
 			promptDuplicateVaults: (name, count) => DuplicateVaultModal.prompt(app, name, count),
 		});
+		// Always persist the name used for resolution so data.json is self-contained:
+		// if this file is later overwritten by a sync from a peer vault that shares the
+		// same Drive folder, the correct folder name survives in both copies.
+		return { ...result, backendUpdates: { ...result.backendUpdates, remoteVaultFolderName: effectiveName } };
 	}
 
 	async disconnect(settings: AirSyncSettings): Promise<Record<string, unknown>> {

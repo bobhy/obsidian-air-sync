@@ -4,7 +4,7 @@ export const REMOTE_VAULT_ROOT = "obsidian-air-sync";
 /** Result of resolving a remote vault */
 export interface RemoteVaultResolution {
 	/** Backend-specific data to persist in settings.backendData */
-	backendUpdates: { remoteVaultFolder: string };
+	backendUpdates: { remoteVaultFolder: string; remoteVaultFolderName?: string };
 	/** True if the remote vault was just created (first-time setup); false if it already existed */
 	wasCreated: boolean;
 }
