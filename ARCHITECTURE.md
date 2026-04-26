@@ -22,16 +22,15 @@ src/
 ├── settings.ts                      # AirSyncSettings type & defaults
 ├── constants.ts                     # Shared constants (AIRSYNC_DIR)
 ├── sync/
-│   ├── types.ts                     # SyncRecord, MixedEntity, SyncAction, SyncPlan, SafetyCheckResult
-│   ├── local-tracker.ts             # LocalChangeTracker — in-memory dirty path set
+│   ├── types.ts                     # SyncRecord, MixedEntity, SyncAction, SyncPlan, ConflictRecord, RenamePair
+│   ├── local-tracker.ts             # LocalChangeTracker — dirty path set + rename/folder-rename pair tracking
 │   ├── change-compare.ts            # hasChanged(), hasRemoteChanged() — diff against baseline
 │   ├── change-detector.ts           # collectChanges() — hot/warm/cold temperature modes
 │   ├── decision-engine.ts           # planSync() — builds SyncPlan from MixedEntity[]
-│   ├── safety-check.ts              # checkSafety() — mass-deletion guard
 │   ├── plan-executor.ts             # executePlan() — grouped execution (A/B/C/D)
 │   ├── state-committer.ts           # commitAction() — per-action SyncRecord upsert/delete
 │   ├── conflict-resolver.ts         # resolveConflict() — 3-strategy conflict resolver
-│   ├── rename-optimizer.ts           # refinePlan() — rename optimization orchestrator
+│   ├── rename-optimizer.ts          # refinePlan() — folder + file rename optimization orchestrator
 │   ├── rename-optimizer-types.ts    # RenameOptResult, SkippedRename — optimization result types
 │   ├── optimize-local-renames.ts    # Local rename optimization (hash-verified)
 │   ├── optimize-remote-renames.ts   # Remote rename optimization (trusted)
@@ -41,6 +40,7 @@ src/
 │   ├── scheduler.ts                 # SyncScheduler — vault events, timers, file-open priority sync
 │   ├── state.ts                     # SyncStateStore — IndexedDB persistence for SyncRecords
 │   ├── error.ts                     # getErrorInfo(), isRateLimitError(), sleep()
+│   ├── signature.ts                 # computeSignature(), readRemoteSignature(), writeRemoteSignature() — session sync guard
 │   ├── conflict-history.ts          # ConflictHistory — JSON audit log per device
 │   └── remote-vault.ts              # RemoteVaultResolution type, REMOTE_VAULT_ROOT constant
 │
@@ -75,12 +75,15 @@ src/
 │   ├── settings.ts                  # AirSyncSettingTab — main settings UI
 │   ├── backend-settings.ts          # Backend connection settings section
 │   ├── googledrive-settings.ts      # Google Drive specific settings
-│   └── join-conflict-modal.ts       # JoinConflictModal — prompt when local and remote both have unsynced content
+│   ├── join-conflict-modal.ts       # JoinConflictModal — prompt when local and remote both have unsynced content
+│   ├── destructive-sync-modal.ts    # DestructiveSyncModal — confirm when delete/overwrite ratio exceeds threshold
+│   └── duplicate-vault-modal.ts     # DuplicateVaultModal — prompt when multiple remote vault folders found
 │
 ├── store/
 │   ├── idb-helper.ts                # IDBHelper — IndexedDB transaction wrapper
 │   ├── instance-store.ts            # InstanceStore — per-device settings (not synced)
-│   └── metadata-store.ts            # MetadataStore<T> — generic IDB-backed file metadata cache
+│   ├── metadata-store.ts            # MetadataStore<T> — generic IDB-backed file metadata cache
+│   └── client-id.ts                 # resolveClientId() — stable per-vault client identifier
 │
 ├── logging/
 │   └── logger.ts                    # Logger — structured log writer (.airsync/logs/)
@@ -121,6 +124,10 @@ src/
      ┌───────────────▼────────────────────┐
      │            Pipeline                │
      │                                    │
+     │  [startup, once] sig check         │  signature.ts
+     │    readRemoteSignature()           │    mismatch → stateStore.clear()
+     │        │                           │
+     │        ▼                           │
      │  collectChanges()                  │  ChangeDetector
      │    collect (hot / warm / cold)     │    temperature modes
      │    enrichHashesForInitialMatch()   │    MD5 vs contentChecksum
@@ -129,12 +136,13 @@ src/
      │  planSync()                        │  DecisionEngine
      │        │                           │    9 action types
      │        ▼                           │
-     │  checkSafety()                     │  SafetyCheck
-     │        │                           │    deletion ratio guard
+     │  [destructive guard]               │  Orchestrator
+     │    confirmDestructiveSync()        │    delete+overwrite ratio check
+     │        │                           │
      │        ▼                           │
      │  refinePlan()                      │  RenameOptimizer
-     │    optimizeLocalFileRenames         │    → rename_remote (hash-verified)
-     │    optimizeRemoteFileRenames        │    → rename_local  (trusted)
+     │    coalesceLocal/RemoteFolderRenames│   → rename_remote (hash-verified)
+     │    optimizeLocal/RemoteFileRenames │    → rename_local  (trusted)
      │        │                           │
      │        ▼                           │
      │  executePlan()                     │  PlanExecutor
@@ -145,6 +153,11 @@ src/
      │        │                           │
      │        ▼                           │
      │  commitAction()  (per action)      │  StateCommitter
+     │        │                           │
+     │        ▼                           │
+     │  [on full success] write sig       │  signature.ts
+     │    writeRemoteSignature()          │
+     │    saveLocalSignature()            │
      └───────────────┬────────────────────┘
                      │
          ┌───────────▼───────────┐
@@ -221,6 +234,8 @@ interface RenameAction {
   path: string;
   action: "rename_remote" | "rename_local";
   oldPath: string;
+  isFolder?: boolean;        // true for folder renames; descendants lists affected children
+  descendants?: RenamePair[];
   local?: FileEntity;
   remote?: FileEntity;
   baseline?: SyncRecord;
@@ -228,18 +243,34 @@ interface RenameAction {
 
 interface SyncPlan {
   actions: SyncAction[];
-  safetyCheck: SafetyCheckResult;
 }
 ```
 
-### SafetyCheckResult (sync/types.ts)
+### Additional types (sync/types.ts)
 
 ```typescript
-interface SafetyCheckResult {
-  shouldAbort: boolean;
-  requiresConfirmation: boolean;
-  deletionRatio?: number;
-  deletionCount?: number;
+/** A rename pair: source and destination paths */
+interface RenamePair {
+  oldPath: string;
+  newPath: string;
+  isFolder?: boolean;
+}
+
+/** User-facing strategy for resolving conflicts */
+type ConflictStrategy = "auto_merge" | "duplicate" | "ask";
+
+/** Audit record written to ConflictHistory after a conflict is resolved */
+interface ConflictRecord {
+  path: string;
+  actionType: SyncActionType;
+  strategy: ConflictStrategy;
+  action: "kept_local" | "kept_remote" | "duplicated" | "merged";
+  local?: FileEntity;
+  remote?: FileEntity;
+  duplicatePath?: string;
+  hasConflictMarkers?: boolean;
+  resolvedAt: string;
+  sessionId: string;
 }
 ```
 
@@ -319,33 +350,27 @@ The provider registry (`fs/registry.ts`) maps backend types to provider instance
 ## Remote vault folder resolution
 
 `resolveGDriveRemoteVault()` (`fs/googledrive/remote-vault.ts`) is called once per connection
-attempt by the backend provider. It locates (or creates) the vault's UUID folder under
+attempt by the backend provider. It locates (or creates) the vault's folder under
 `obsidian-air-sync/` in Google Drive and returns its folder ID for use by `GoogleDriveFs`.
 
-**Fast path (cached folder ID known):** `getFile` verifies the cached folder is still accessible,
-then `readMetadata` reads `.airsync/metadata.json` once:
+**Folder naming:** The folder is named `sanitizeDbName(vaultName)` — a sanitized form of the local
+vault name, not a UUID.
 
-- If metadata exists and the vault name matches → proceed (no write).
-- If metadata exists but the vault name differs → `VaultNameMismatchModal` explains the situation
-  and the connection fails. The user must rename the local vault to match the remote name before
-  retrying. (This guards against one device renaming the vault while others still have the old name
-  cached.)
-- If metadata is missing → `updateMetadataIfNeeded` recreates it.
+**Discovery (single path):** The root `obsidian-air-sync/` folder is found or created, then its
+children are listed and filtered by folder name:
 
-A non-destructive sibling scan then checks for duplicate vault folders with the same name and fires
-a toast warning if any are found. The cached folder is always used regardless.
-
-**Fresh connect (no cached folder ID):** All sibling UUID folders under the root are scanned and
-their `metadata.json` files read to collect every folder that claims the same vault name:
-
-- 0 matches → a new UUID folder is created with a fresh `metadata.json`.
+- 0 matches → a new folder is created with the sanitized vault name.
 - 1 match → that folder is used.
-- 2+ matches → a `DuplicateVaultModal` explains the situation and the connection fails. The user
+- 2+ matches → `DuplicateVaultModal` explains the situation and the connection fails. The user
   must remove the extra folder(s) in Google Drive before retrying.
 
+The resolved folder ID is stored in `backendData.remoteVaultFolder` and used by `GoogleDriveFs`
+for all subsequent I/O. `resolveRemoteVault` is called on every connect attempt — there is no
+separate fast path for a cached folder ID.
+
 The `RemoteVaultCallbacks` interface decouples the resolution logic from UI: callers provide
-`notify` (toast), `promptDuplicateVaults`, and `promptVaultNameMismatch` (modal) callbacks; tests
-omit them to get plain error throws.
+`notify` (toast) and `promptDuplicateVaults` (modal) callbacks; tests omit them to get plain
+error throws.
 
 ## Startup safety: stale sync state
 
@@ -353,10 +378,9 @@ omit them to get plain error throws.
 the Obsidian application data directory, not in the plugin folder. `vaultId` itself is persisted in
 `InstanceStore` (a separate IDB database), also independent of `settings.json`.
 
-This creates a hazard: if the plugin folder is deleted (reinstall) while the local vault's
-`.airsync/` directory is also absent, the orphaned sync records would cause warm-mode change
-detection to classify `.airsync/metadata.json` as *locally deleted* and issue a `delete_remote` —
-trashing the Google Drive file that identifies the remote vault folder.
+This creates a hazard: if the plugin folder is deleted (reinstall) and the local vault files are
+also absent, orphaned sync records would cause warm-mode change detection to classify those files
+as *locally deleted* and issue `delete_remote` actions — potentially trashing remote content.
 
 **Guard:** `main.ts` detects a missing `settings.json` on startup (`loadData()` returning null) and
 calls `orchestrator.clearSyncState()` before the first sync runs. With no sync records the next sync
