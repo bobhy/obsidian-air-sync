@@ -37,7 +37,7 @@ function makeApp(vaultName = "test-vault"): App {
  */
 function renderAndCapture(
 	settings: AirSyncSettings,
-	onSave: ReturnType<typeof vi.fn>,
+	onSave: (updates: Record<string, unknown>) => Promise<void>,
 	actions: BackendConnectionActions,
 	app: App,
 ): {
@@ -86,7 +86,7 @@ function renderAndCapture(
 
 describe("GoogleDriveSettingsRenderer — remote vault folder", () => {
 	it("sanitizes unclean input: saves the cleaned value and echoes it back to the field", async () => {
-		const onSave = vi.fn().mockResolvedValue(undefined);
+		const onSave = vi.fn<(updates: Record<string, unknown>) => Promise<void>>().mockResolvedValue(undefined);
 		const actions = makeActions();
 		const { triggerChange, setValueCalls } = renderAndCapture(
 			makeSettings(),
@@ -104,7 +104,7 @@ describe("GoogleDriveSettingsRenderer — remote vault folder", () => {
 	});
 
 	it("does not call setValue when input is already clean", async () => {
-		const onSave = vi.fn().mockResolvedValue(undefined);
+		const onSave = vi.fn<(updates: Record<string, unknown>) => Promise<void>>().mockResolvedValue(undefined);
 		const actions = makeActions();
 		const { triggerChange, setValueCalls } = renderAndCapture(
 			makeSettings(),

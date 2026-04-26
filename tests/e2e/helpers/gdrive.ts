@@ -17,6 +17,7 @@ interface DriveFile {
 
 interface DriveFileList {
 	files: DriveFile[];
+	nextPageToken?: string;
 }
 
 interface TokenResponse {
@@ -118,6 +119,39 @@ export async function resolveVaultFolder(vaultName: string): Promise<string> {
 	const vault = await findChildByName(root.id, sanitizeDbName(vaultName), FOLDER_MIME);
 	if (!vault) throw new Error(`Vault folder "${sanitizeDbName(vaultName)}" not found in GDrive`);
 	return vault.id;
+}
+
+export async function listFiles(folderId: string): Promise<DriveFile[]> {
+	const results: DriveFile[] = [];
+	let pageToken: string | undefined;
+	do {
+		const token = await getAccessToken();
+		const params = new URLSearchParams({
+			q: `'${folderId}' in parents and trashed = false`,
+			fields: "nextPageToken,files(id,name,mimeType)",
+			pageSize: "1000",
+			...(pageToken ? { pageToken } : {}),
+		});
+		const response = await fetch(`${DRIVE_API}/files?${params.toString()}`, {
+			headers: { Authorization: `Bearer ${token}` },
+		});
+		if (!response.ok) throw new Error(`GDrive list failed: ${response.status}`);
+		const result = await response.json() as DriveFileList;
+		results.push(...result.files);
+		pageToken = result.nextPageToken;
+	} while (pageToken);
+	return results;
+}
+
+export async function deleteFile(fileId: string): Promise<void> {
+	const token = await getAccessToken();
+	const response = await fetch(`${DRIVE_API}/files/${fileId}`, {
+		method: "DELETE",
+		headers: { Authorization: `Bearer ${token}` },
+	});
+	if (!response.ok && response.status !== 404) {
+		throw new Error(`GDrive delete failed: ${response.status} for file ${fileId}`);
+	}
 }
 
 function sleep(ms: number): Promise<void> {

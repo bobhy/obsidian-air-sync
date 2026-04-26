@@ -14,7 +14,8 @@
 		"deploy": "node esbuild.config.mjs production && node deploy.mjs",
 		"pretest:e2e": "npm run build",
 		"test:e2e": "vitest run --config vitest.e2e.config.ts",
-		"setup:e2e": "node --import jiti/register tests/e2e/setup-vault.ts"
+		"setup:e2e": "node --import jiti/register tests/e2e/setup-vault.ts",
+		"cleanup:e2e": "node --import jiti/register tests/e2e/cleanup-vaults.ts"
 	},
 	"keywords": [],
 	"license": "MIT",
