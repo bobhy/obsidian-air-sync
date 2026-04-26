@@ -15,8 +15,12 @@ export default tseslint.config(
 					allowDefaultProject: [
 						'eslint.config.js',
 						'manifest.json',
-						'vitest.config.ts'
-					]
+						'vitest.config.ts',
+						'vitest.e2e.config.ts',
+						'tests/e2e/*.ts',
+						'tests/e2e/helpers/*.ts',
+					],
+					maximumDefaultProjectFileMatchCount_THIS_WILL_SLOW_DOWN_LINTING: 20,
 				},
 				tsconfigRootDir: import.meta.dirname,
 				extraFileExtensions: ['.json']
@@ -24,6 +28,20 @@ export default tseslint.config(
 		},
 	},
 	...obsidianmd.configs.recommended,
+	{
+		// E2E test infrastructure runs in Node.js, not inside Obsidian
+		files: ["tests/e2e/**/*.ts"],
+		languageOptions: {
+			globals: {
+				...globals.node,
+			},
+		},
+		rules: {
+			"import/no-nodejs-modules": "off",
+			"no-restricted-globals": "off",
+			"no-console": "off",
+		},
+	},
 	globalIgnores([
 		"node_modules",
 		"dist",

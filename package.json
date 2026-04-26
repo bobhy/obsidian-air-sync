@@ -11,7 +11,10 @@
 		"lint": "eslint --max-warnings 0 .",
 		"test": "vitest run",
 		"test:watch": "vitest",
-		"deploy": "node esbuild.config.mjs production && node deploy.mjs"
+		"deploy": "node esbuild.config.mjs production && node deploy.mjs",
+		"pretest:e2e": "npm run build",
+		"test:e2e": "vitest run --config vitest.e2e.config.ts",
+		"setup:e2e": "node --import jiti/register tests/e2e/setup-vault.ts"
 	},
 	"keywords": [],
 	"license": "MIT",
