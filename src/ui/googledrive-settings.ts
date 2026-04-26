@@ -21,7 +21,7 @@ export class GoogleDriveSettingsRenderer implements IBackendSettingsRenderer {
 	render(
 		containerEl: HTMLElement,
 		settings: AirSyncSettings,
-		_onSave: (updates: Record<string, unknown>) => Promise<void>,
+		onSave: (updates: Record<string, unknown>) => Promise<void>,
 		actions: BackendConnectionActions,
 		app: App,
 	): void {
@@ -29,6 +29,7 @@ export class GoogleDriveSettingsRenderer implements IBackendSettingsRenderer {
 
 		const provider = getBackendProvider("googledrive");
 		const isConnected = provider?.isConnected(settings) ?? false;
+		const defaultFolderName = sanitizeDbName(app.vault.getName());
 
 		let statusDesc: string;
 		let statusClass: string;
@@ -59,18 +60,32 @@ export class GoogleDriveSettingsRenderer implements IBackendSettingsRenderer {
 					})
 			);
 
-		// Show remote vault folder name when connected (read-only)
-		if (isConnected && data.remoteVaultFolder) {
-			new Setting(containerEl)
-				.setName("Remote vault folder")
-				.setDesc("Automatically managed folder in Google Drive")
-				.addText((text) =>
-					text
-						.setValue(sanitizeDbName(app.vault.getName()))
-						.setDisabled(true)
-				);
-		}
-
+		new Setting(containerEl)
+			.setName("Remote vault folder")
+			.setDesc(
+				isConnected
+					? "Disconnect from Google Drive to change this setting."
+					: "Folder name in Google Drive. Defaults to the vault name. " +
+					  "Special characters are replaced with underscores."
+			)
+			.addText((text) => {
+				text
+					.setPlaceholder(defaultFolderName)
+					.setValue(data.remoteVaultFolderName ?? "")
+					.setDisabled(isConnected);
+				if (!isConnected) {
+					text.onChange(async (value) => {
+						const sanitized = sanitizeDbName(value);
+						if (sanitized !== value) text.setValue(sanitized);
+						const currentEffective = data.remoteVaultFolderName || defaultFolderName;
+						const newEffective = sanitized || defaultFolderName;
+						await onSave({ remoteVaultFolderName: sanitized });
+						if (newEffective !== currentEffective) {
+							await actions.clearSyncHistory();
+						}
+					});
+				}
+			});
 	}
 }
 
@@ -148,17 +163,33 @@ export class GoogleDriveCustomSettingsRenderer implements IBackendSettingsRender
 					})
 			);
 
-		// Show remote vault folder name when connected (read-only, derived from vault name)
-		if (isConnected && data.remoteVaultFolder) {
-			new Setting(containerEl)
-				.setName("Remote vault folder")
-				.setDesc("Folder name in Google Drive, derived from vault name")
-				.addText((text) =>
-					text
-						.setValue(sanitizeDbName(app.vault.getName()))
-						.setDisabled(true)
-				);
-		}
+		const defaultFolderName = sanitizeDbName(app.vault.getName());
+		new Setting(containerEl)
+			.setName("Remote vault folder")
+			.setDesc(
+				isConnected
+					? "Disconnect from Google Drive to change this setting."
+					: "Folder name in Google Drive. Defaults to the vault name. " +
+					  "Special characters are replaced with underscores."
+			)
+			.addText((text) => {
+				text
+					.setPlaceholder(defaultFolderName)
+					.setValue(data.remoteVaultFolderName ?? "")
+					.setDisabled(isConnected);
+				if (!isConnected) {
+					text.onChange(async (value) => {
+						const sanitized = sanitizeDbName(value);
+						if (sanitized !== value) text.setValue(sanitized);
+						const currentEffective = data.remoteVaultFolderName || defaultFolderName;
+						const newEffective = sanitized || defaultFolderName;
+						await onSave({ remoteVaultFolderName: sanitized });
+						if (newEffective !== currentEffective) {
+							await actions.clearSyncHistory();
+						}
+					});
+				}
+			});
 
 		let statusDesc: string;
 		let statusClass: string;

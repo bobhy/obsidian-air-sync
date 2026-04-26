@@ -8,8 +8,14 @@ import { GoogleDriveAuthProviderBase, GoogleDriveProviderBase } from "./provider
 
 /** All data stored in backendData["googledrive"] (tokens live in SecretStorage) */
 export interface GoogleDriveBackendData {
-	/** Sanitized vault name used as the remote folder name; read-only display field. */
+	/** Drive folder ID resolved by resolveGDriveRemoteVault; set on connect, cleared on disconnect. */
 	remoteVaultFolder: string;
+	/**
+	 * Custom remote folder name. When set, overrides the vault name for Drive folder lookup.
+	 * Stored as the user entered it; sanitized via sanitizeDbName() at use time.
+	 * Empty string means "use the vault name" (the default).
+	 */
+	remoteVaultFolderName?: string;
 	/**
 	 * Loaded from InstanceStore at startup, not persisted to settings.json.
 	 * Optional because it may be absent on the first sync after a fresh install.

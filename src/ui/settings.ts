@@ -92,6 +92,7 @@ export class AirSyncSettingTab extends PluginSettingTab {
 						this.plugin.backendManager.completeBackendConnect(code),
 					disconnect: () => this.plugin.backendManager.disconnectBackend(),
 					refreshDisplay: () => this.display(),
+					clearSyncHistory: () => this.plugin.clearSyncHistory(),
 				},
 				this.app,
 			);

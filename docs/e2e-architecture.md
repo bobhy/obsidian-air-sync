@@ -121,6 +121,20 @@ The vault folder name on Drive uses the same `sanitizeDbName` the plugin uses: n
 
 Unit tests (`npm test`) use `vitest.config.ts` and never include `*.e2e.ts` files.
 
+## Cross-vault sync scenarios
+
+To test syncing between two vaults sharing the same Drive folder, set the peer vault's "Remote
+vault folder" to the same name as the primary vault before connecting it to Google Drive. With the
+plugin disconnected in the peer vault, write the desired name to `data.json`:
+
+```json
+{ "remoteVaultFolderName": "air-sync-e2e" }
+```
+
+`global-setup.ts` can write this before reloading the plugin in the peer vault, so no manual UI
+interaction is needed. On connect, `resolveGDriveRemoteVault` looks up that name and lands on the
+same Drive folder already used by the primary vault.
+
 ## Adding a new scenario
 
 1. Create `tests/e2e/<scenario>.e2e.ts`

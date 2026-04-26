@@ -133,6 +133,7 @@ export class GoogleDriveCustomProvider extends GoogleDriveProviderBase {
 			customScope: data.customScope,
 			customRedirectUri: data.customRedirectUri,
 			customIncludeGrantedScopes: data.customIncludeGrantedScopes,
+			remoteVaultFolderName: data.remoteVaultFolderName,
 		};
 	}
 

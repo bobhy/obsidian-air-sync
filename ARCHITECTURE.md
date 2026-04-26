@@ -16,7 +16,7 @@ Sync should be invisible -- like air. When the user opens Obsidian, changes sinc
 
 ## File structure
 
-```
+```shell
 src/
 ├── main.ts                          # Plugin entry point (lifecycle only)
 ├── settings.ts                      # AirSyncSettings type & defaults
@@ -100,7 +100,7 @@ src/
 
 ## Layer architecture
 
-```
+```shell
 ┌──────────────────────────────────────────────────────┐
 │  main.ts                                             │
 │  Plugin lifecycle: load settings, register commands, │
@@ -353,8 +353,10 @@ The provider registry (`fs/registry.ts`) maps backend types to provider instance
 attempt by the backend provider. It locates (or creates) the vault's folder under
 `obsidian-air-sync/` in Google Drive and returns its folder ID for use by `GoogleDriveFs`.
 
-**Folder naming:** The folder is named `sanitizeDbName(vaultName)` — a sanitized form of the local
-vault name, not a UUID.
+**Folder naming:** The folder is named `sanitizeDbName(effectiveName)` where `effectiveName` is
+`backendData.remoteVaultFolderName` when the user has set a custom name, or the local vault name
+otherwise. This allows two vaults with different local names to share one Drive folder, or a vault
+to be renamed locally without abandoning its existing Drive folder.
 
 **Discovery (single path):** The root `obsidian-air-sync/` folder is found or created, then its
 children are listed and filtered by folder name:

@@ -5,7 +5,16 @@ All notable changes to this project will be documented in this file.
 The format is based on [Keep a Changelog](https://keepachangelog.com/en/1.1.0/),
 and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0.html).
 
-
+## [Unreleased]
+### Added
+- **Remote vault folder name** setting in Google Drive connection settings.  
+  Defaults to the local vault name (the previous hard-coded behaviour), but can now be set to any
+  value while the plugin is disconnected from Google Drive.  
+  This allows two vaults with different local names to share the same Drive folder, or a vault to
+  be renamed locally without losing its sync history in Drive.  
+  Changing the setting clears local sync history so the next sync is a clean full scan against
+  the newly targeted folder.  
+  The setting is preserved across disconnect/reconnect cycles.
 
 ## [0.3.1] - 2026-04-26
 ### Fixed
@@ -24,7 +33,7 @@ and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0
   Plugin looks for remote folder whose name matches current obsidian vault name.  
   Doesn't depend on finding `.airsync/metadata.json` with correct `vaultName` key.
 - client now computes a hash over last synced files and operations and caches that 
-  locally and in the remote folder (in file `.airsync/<clientId>.json).  
+  locally and in the remote folder (in file `.airsync/<clientId>.json`).  
   When both signatures exist and actually match, client knows its safe to trust 
   local sync history and resumes doing incremental syncs.  If signatures don't match, 
   client does a full sync (and caches new sync signatures).  

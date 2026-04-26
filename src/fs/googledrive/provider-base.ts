@@ -235,16 +235,19 @@ export abstract class GoogleDriveProviderBase implements IBackendProvider {
 		const googleAuth = this.auth.getOrCreateGoogleAuth(data, logger);
 		googleAuth.setTokens(tokens.refreshToken, tokens.accessToken, data.accessTokenExpiry ?? 0);
 		const client = new DriveClient((force) => googleAuth.getAccessToken(force), logger);
-		return resolveGDriveRemoteVault(client, vaultName, logger, {
+		// Use the user's custom folder name when set; fall back to the vault name.
+		const effectiveName = data.remoteVaultFolderName || vaultName;
+		return resolveGDriveRemoteVault(client, effectiveName, logger, {
 			notify: (message) => new Notice(message, 10_000),
 			promptDuplicateVaults: (name, count) => DuplicateVaultModal.prompt(app, name, count),
 		});
 	}
 
-	async disconnect(_settings: AirSyncSettings): Promise<Record<string, unknown>> {
+	async disconnect(settings: AirSyncSettings): Promise<Record<string, unknown>> {
 		await this.auth.revokeAuth();
 		clearTokens(this.secretStore, this.type);
-		return { ...this.getDefaultData() };
+		// Preserve the custom folder name so it survives disconnect/reconnect cycles.
+		return { ...this.getDefaultData(), remoteVaultFolderName: this.getData(settings).remoteVaultFolderName };
 	}
 
 	protected abstract getData(settings: AirSyncSettings): GoogleDriveBackendData;

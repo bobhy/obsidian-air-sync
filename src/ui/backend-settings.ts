@@ -8,6 +8,7 @@ export interface BackendConnectionActions {
 	completeAuth(code: string): Promise<void>;
 	disconnect(): Promise<void>;
 	refreshDisplay(): void;
+	clearSyncHistory(): Promise<void>;
 }
 
 /**

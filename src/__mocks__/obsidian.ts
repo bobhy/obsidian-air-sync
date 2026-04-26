@@ -29,6 +29,7 @@ export class Modal {
 }
 
 export class Setting {
+	settingEl = { addClass: () => {} } as unknown as HTMLElement;
 	constructor(_containerEl: HTMLElement) {}
 	setName(_name: string) { return this; }
 	setDesc(_desc: string) { return this; }
@@ -38,6 +39,7 @@ export class Setting {
 	addDropdown(_cb: (d: unknown) => unknown) { return this; }
 	addToggle(_cb: (t: unknown) => unknown) { return this; }
 	addTextArea(_cb: (t: unknown) => unknown) { return this; }
+	addComponent(_cb: (c: unknown) => unknown) { return this; }
 }
 
 export const Platform = {
