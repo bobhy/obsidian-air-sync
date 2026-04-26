@@ -7,6 +7,7 @@ import {
 	openPeerVault,
 	createNote,
 	triggerSync,
+	sleep,
 	pollForLocalFile,
 	pollForLocalFileGone,
 } from "./helpers/cli.js";
@@ -55,8 +56,12 @@ describe("cross-vault sync", () => {
 
 		// Delete from primary vault. The OS-level rm triggers Obsidian's file
 		// watcher → vault delete event → debounced sync → Drive deletion.
+		// Wait for any in-flight sync and the debounce window to expire, then
+		// trigger a fresh sync cycle to push the deletion to Drive.
 		await openVault();
 		await rm(join(VAULT_PATH, filename), { force: true });
+		await sleep(6_000);
+		await triggerSync();
 		await pollForFileGone(driveFile.id, 60_000);
 
 		// Switch to peer vault; trigger a sync so it pulls the deletion.

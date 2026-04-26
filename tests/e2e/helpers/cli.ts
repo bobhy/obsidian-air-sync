@@ -6,7 +6,7 @@ import { VAULT_NAME, PEER_VAULT_NAME } from "./env.js";
 
 const execAsync = promisify(exec);
 
-function sleep(ms: number): Promise<void> {
+export function sleep(ms: number): Promise<void> {
 	return new Promise<void>((r) => setTimeout(r, ms));
 }
 
@@ -18,12 +18,14 @@ async function run(args: string): Promise<string> {
 
 export async function openVault(): Promise<void> {
 	await run(`vault=${VAULT_NAME}`);
-	await sleep(3_000);
+	// Allow initBackend() (including resolveRemoteVault Drive API calls) to finish
+	// before callers fire sync triggers. 3 s is not enough; 8 s gives comfortable margin.
+	await sleep(8_000);
 }
 
 export async function openPeerVault(): Promise<void> {
 	await run(`vault=${PEER_VAULT_NAME}`);
-	await sleep(3_000);
+	await sleep(8_000);
 }
 
 export async function createNote(name: string): Promise<void> {

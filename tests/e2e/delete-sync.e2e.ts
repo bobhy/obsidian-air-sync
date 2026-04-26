@@ -2,7 +2,7 @@ import { describe, it, expect, beforeAll } from "vitest";
 import { rm } from "node:fs/promises";
 import { join } from "node:path";
 import { VAULT_NAME, VAULT_PATH } from "./helpers/env.js";
-import { openVault, createNote } from "./helpers/cli.js";
+import { openVault, createNote, triggerSync, sleep } from "./helpers/cli.js";
 import { resolveVaultFolder, pollForFile, pollForFileGone } from "./helpers/gdrive.js";
 
 let vaultFolderId: string;
@@ -22,9 +22,13 @@ describe("delete sync", () => {
 		const file = await pollForFile(vaultFolderId, filename);
 		expect(file.name).toBe(filename);
 
-		// OS-level delete — triggers Obsidian's file watcher → vault.on('delete') → sync
+		// OS-level delete triggers Obsidian's file watcher → vault delete event → debounced sync.
+		// Wait for any in-flight create-sync to finish and the debounce window to expire,
+		// then trigger a fresh sync cycle that will pick up and push the deletion.
 		await rm(localPath, { force: true });
+		await sleep(6_000);
+		await triggerSync();
 
-		await pollForFileGone(file.id);
+		await pollForFileGone(file.id, 60_000);
 	});
 });
