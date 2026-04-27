@@ -227,8 +227,18 @@ describe("cross-vault sync", () => {
 		}, filename);
 		await pollForFileGone(driveFile.id, 60_000);
 
-		// Trigger sync in primary to pull the deletion.
+		// Trigger sync in primary to pull the deletion. Drive's changes.list can lag
+		// behind files.get visibility, so re-trigger every 10s until the file is gone.
 		await triggerSync(primary());
-		await waitForVaultFileGone(primary(), filename);
+		const syncDeadline = Date.now() + 90_000;
+		while (true) {
+			const gone = await execVault(primary(), (ctx, fn) =>
+				ctx.app.vault.getAbstractFileByPath(fn as string) === null, filename);
+			if (gone) break;
+			if (Date.now() >= syncDeadline)
+				throw new Error(`Timed out waiting for "${filename}" to leave primary vault`);
+			await new Promise<void>(r => setTimeout(r, 10_000));
+			await triggerSync(primary());
+		}
 	});
 });
