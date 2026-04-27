@@ -59,13 +59,16 @@ async function shortHash(input: string): Promise<string> {
 }
 
 function tryGetHostname(): string | null {
-	if (process.env.HOSTNAME) return process.env.HOSTNAME;
-
 	try {
-		const g = globalThis as unknown as { require?: (id: string) => unknown };
+		const g = globalThis as unknown as {
+			process?: { env?: { HOSTNAME?: string } };
+			require?: (id: string) => unknown;
+		};
+		if (g.process?.env?.HOSTNAME) return g.process.env.HOSTNAME;
 		const os = g.require?.("os") as { hostname?: () => string } | undefined;
 		return os?.hostname?.() ?? null;
 	} catch {
+		// process / os not available (mobile WebView)
 		return null;
 	}
 }
