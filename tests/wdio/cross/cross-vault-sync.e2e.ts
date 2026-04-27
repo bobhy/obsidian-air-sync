@@ -1,6 +1,6 @@
 import { browser, expect } from "@wdio/globals";
 import { before, describe, it, afterEach } from "mocha";
-import { resolveVaultFolder, pollForFile, pollForFileGone, pollForFileContent } from "../helpers/gdrive.js";
+import { resolveVaultFolder, pollForFile, pollForFileGone, pollForFileContent, deleteStaleTestFiles } from "../helpers/gdrive.js";
 
 const DRIVE_FOLDER_NAME = "air-sync-e2e";
 
@@ -126,6 +126,9 @@ before(async () => {
 	]);
 
 	vaultFolderId = await resolveVaultFolder(DRIVE_FOLDER_NAME);
+
+	// Remove stale e2e-cross-* files from Drive left by aborted previous runs.
+	await deleteStaleTestFiles(vaultFolderId, "e2e-cross-");
 });
 
 // Remove any stale e2e-cross-* trigger notes left by aborted test runs.

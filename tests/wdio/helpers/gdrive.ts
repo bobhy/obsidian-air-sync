@@ -151,3 +151,18 @@ export async function deleteFile(fileId: string): Promise<void> {
 		throw new Error(`GDrive delete failed: ${response.status} for file ${fileId}`);
 	}
 }
+
+export async function deleteStaleTestFiles(folderId: string, prefix: string): Promise<void> {
+	const token = await getAccessToken();
+	const params = new URLSearchParams({
+		q: `'${folderId}' in parents and name contains '${prefix}' and trashed = false`,
+		fields: "files(id,name)",
+		pageSize: "1000",
+	});
+	const response = await fetch(`${DRIVE_API}/files?${params.toString()}`, {
+		headers: { Authorization: `Bearer ${token}` },
+	});
+	if (!response.ok) throw new Error(`GDrive list failed: ${response.status}`);
+	const result = await response.json() as DriveFileList;
+	await Promise.all(result.files.map(f => deleteFile(f.id)));
+}
