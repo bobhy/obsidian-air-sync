@@ -1,6 +1,6 @@
 import { browser, expect } from "@wdio/globals";
 import { before, describe, it, afterEach } from "mocha";
-import { resolveVaultFolder, pollForFile, pollForFileGone } from "../helpers/gdrive.js";
+import { resolveVaultFolder, pollForFile, pollForFileGone, pollForFileContent } from "../helpers/gdrive.js";
 
 const DRIVE_FOLDER_NAME = "air-sync-e2e";
 
@@ -21,6 +21,8 @@ type VaultCtx = {
 			getMarkdownFiles(): Array<{ name: string }>;
 			delete(file: unknown): Promise<void>;
 			getAbstractFileByPath(path: string): unknown;
+			read(file: unknown): Promise<string>;
+			modify(file: unknown, content: string): Promise<void>;
 		};
 		secretStorage: { setSecret(key: string, value: string): Promise<void> };
 		plugins: { plugins: Record<string, unknown> };
@@ -240,5 +242,96 @@ describe("cross-vault sync", () => {
 			await new Promise<void>(r => setTimeout(r, 10_000));
 			await triggerSync(primary());
 		}
+	});
+
+	it("merges conflicting single-line appends from both vaults into a conflict region", async () => {
+		const filename = `e2e-cross-conflict-${Date.now()}.md`;
+		const baseContent = "line one\nline two\nline three\n";
+
+		// Create the file in primary and let it sync to peer.
+		await execVault(primary(), async (ctx, fn, content) => {
+			await ctx.app.vault.create(fn as string, content as string);
+		}, filename, baseContent);
+		const driveFile = await pollForFile(vaultFolderId, filename, 60_000);
+		await triggerSync(peer());
+		await waitForVaultFile(peer(), filename);
+
+		// Pause sync in both vaults so the conflicting edits don't race.
+		await Promise.all([
+			execVault(primary(), (ctx) => {
+				(ctx.app.plugins.plugins["air-sync"] as { syncPaused: boolean }).syncPaused = true;
+			}),
+			execVault(peer(), (ctx) => {
+				(ctx.app.plugins.plugins["air-sync"] as { syncPaused: boolean }).syncPaused = true;
+			}),
+		]);
+
+		// Each vault appends a different line while sync is off.
+		await execVault(primary(), async (ctx, fn) => {
+			const file = ctx.app.vault.getAbstractFileByPath(fn as string);
+			const current = await ctx.app.vault.read(file);
+			await ctx.app.vault.modify(file, current + "from-primary\n");
+		}, filename);
+		await execVault(peer(), async (ctx, fn) => {
+			const file = ctx.app.vault.getAbstractFileByPath(fn as string);
+			const current = await ctx.app.vault.read(file);
+			await ctx.app.vault.modify(file, current + "from-peer\n");
+		}, filename);
+
+		// Resume primary and let it upload its version to Drive first.
+		await execVault(primary(), (ctx) => {
+			(ctx.app.plugins.plugins["air-sync"] as { syncPaused: boolean }).syncPaused = false;
+		});
+		await triggerSync(primary());
+		await pollForFileContent(driveFile.id, "from-primary", 60_000);
+
+		// Resume peer and let it sync — detects a conflict and performs a 3-way merge,
+		// writing conflict markers into the file on both local and Drive.
+		await execVault(peer(), (ctx) => {
+			(ctx.app.plugins.plugins["air-sync"] as { syncPaused: boolean }).syncPaused = false;
+		});
+		await triggerSync(peer());
+
+		// Wait for conflict markers to appear in the peer vault (re-trigger if Drive lags).
+		const conflictDeadline = Date.now() + 90_000;
+		let peerContent = "";
+		while (true) {
+			peerContent = await execVault(peer(), async (ctx, fn) => {
+				const file = ctx.app.vault.getAbstractFileByPath(fn as string);
+				if (!file) return "";
+				return await ctx.app.vault.read(file);
+			}, filename);
+			if (peerContent.includes("<<<<<<<")) break;
+			if (Date.now() >= conflictDeadline)
+				throw new Error("Timed out waiting for conflict markers in peer vault");
+			await new Promise<void>(r => setTimeout(r, 5_000));
+			await triggerSync(peer());
+		}
+
+		expect(peerContent).toContain("<<<<<<< LOCAL");
+		expect(peerContent).toContain("from-peer");
+		expect(peerContent).toContain("=======");
+		expect(peerContent).toContain("from-primary");
+		expect(peerContent).toContain(">>>>>>> REMOTE");
+
+		// Peer wrote the merged content back to Drive; now primary pulls it.
+		await triggerSync(primary());
+		const mergeDeadline = Date.now() + 90_000;
+		let primaryContent = "";
+		while (true) {
+			primaryContent = await execVault(primary(), async (ctx, fn) => {
+				const file = ctx.app.vault.getAbstractFileByPath(fn as string);
+				if (!file) return "";
+				return await ctx.app.vault.read(file);
+			}, filename);
+			if (primaryContent.includes("<<<<<<<")) break;
+			if (Date.now() >= mergeDeadline)
+				throw new Error("Timed out waiting for primary to pull merged content");
+			await new Promise<void>(r => setTimeout(r, 5_000));
+			await triggerSync(primary());
+		}
+
+		expect(primaryContent).toContain("<<<<<<< LOCAL");
+		expect(primaryContent).toContain(">>>>>>> REMOTE");
 	});
 });

@@ -120,6 +120,27 @@ export async function pollForFileGone(fileId: string, timeoutMs = 30_000): Promi
 	throw new Error(`Timed out after ${timeoutMs}ms waiting for Drive file ${fileId} to be removed`);
 }
 
+export async function pollForFileContent(
+	fileId: string,
+	expectedText: string,
+	timeoutMs = 30_000,
+): Promise<void> {
+	const deadline = Date.now() + timeoutMs;
+	while (Date.now() < deadline) {
+		const token = await getAccessToken();
+		const response = await fetch(
+			`${DRIVE_API}/files/${fileId}?alt=media`,
+			{ headers: { Authorization: `Bearer ${token}` } },
+		);
+		if (response.ok) {
+			const text = await response.text();
+			if (text.includes(expectedText)) return;
+		}
+		await new Promise<void>(r => setTimeout(r, POLL_INTERVAL_MS));
+	}
+	throw new Error(`Timed out after ${timeoutMs}ms waiting for Drive file ${fileId} to contain "${expectedText}"`);
+}
+
 export async function deleteFile(fileId: string): Promise<void> {
 	const token = await getAccessToken();
 	const response = await fetch(`${DRIVE_API}/files/${fileId}`, {
