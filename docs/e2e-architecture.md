@@ -1,200 +1,142 @@
 # E2E test architecture
 
-The E2E suite exercises the plugin against a live Obsidian desktop instance and real Google Drive. No mocking — every sync cycle runs the full stack.
+The E2E suite exercises the plugin against live Obsidian desktop instances and real Google Drive. No mocking — every sync cycle runs the full stack.
 
-## Prerequisites
+## Test types
 
-- Obsidian desktop installed, with the official Obsidian CLI available as `obsidian` on `$PATH`
-- A Google account used to connect the test vault to Google Drive
+| Command | Config | What it runs |
+|---|---|---|
+| `npm run test:e2e:single` | `wdio.conf.mts` | Single-vault tests in `tests/wdio/single/` |
+| `npm run test:e2e:cross` | `wdio.multiremote.conf.mts` | Cross-vault tests in `tests/wdio/cross/` using two simultaneous Obsidian instances |
+
+Both commands run `npm run build` first so tests always exercise the latest code.
 
 ## One-time setup
 
 ```bash
-npm run setup:e2e
-# or, for a non-default location:
-OBSIDIAN-E2E-ROOT=~/my-test-vaults npm run setup:e2e
+npm run setup:e2e:wdio
 ```
 
-`setup:e2e` is interactive:
+This is interactive. It opens a browser for the Google Drive OAuth flow and saves the resulting refresh token to `.e2e-refresh-token`. Subsequent runs read the token from that file automatically; you do not need to redo the OAuth flow unless the token expires or is revoked.
 
-1. Creates `$E2E_ROOT/air-sync-e2e/` and installs the built plugin into it
-2. Prompts you to open that folder as a vault in Obsidian and enable community plugins
-3. Prompts you to complete the Google Drive OAuth flow inside the plugin settings
-4. Reads the resulting refresh token from vault SecretStorage via `obsidian eval` and validates it against the auth server
-5. Exits with an error if the token is missing or rejected — so a successful exit means the vault is ready
-
-The refresh token is stored in Obsidian's SecretStorage, not in any file. Subsequent runs retrieve it automatically; you do not need to redo the OAuth flow unless the token expires or is revoked.
-
-## Running tests
-
-```bash
-npm run test:e2e                                          # all e2e tests
-npm run test:e2e -- tests/e2e/cross-vault-sync.e2e.ts    # one file
-npm run test:e2e -- -t "syncs a new note"                # tests matching a pattern
-```
-
-`pretest:e2e` runs `npm run build` first, so tests always exercise the latest code.
-
-## Cleanup
-
-Each test cleans up after itself on success. Failed tests leave `e2e-*.md` files in both vaults and on Drive. Run the cleanup script to remove them:
-
-```bash
-npm run cleanup:e2e
-```
-
-What it does (Obsidian must be installed; the script opens the vaults itself):
-
-1. Opens the primary vault
-2. Pauses sync (best-effort — tolerable race with the startup sync)
-3. Deletes `e2e-*.md` files from both local vault directories
-4. Clears IDB sync state for both vaults:
-   - `clearSyncHistory()` on the primary vault (empties `SyncStateStore`, resets `InstanceStore` record)
-   - Drops `MetadataStore` (Drive file cache + changes cursor) for both vaults via `indexedDB.deleteDatabase`
-   - Drops `SyncStateStore` for the peer vault (inaccessible via `clearSyncHistory` from this context)
-5. Deletes all `e2e-*.md` files from Google Drive (both vaults share the same folder)
-6. Switches to the peer vault to reset its `InstanceStore` record via `clearSyncHistory()`
-7. Returns to the primary vault
-
-The `InstanceStore` reset (step 4/6) is necessary so the plugin starts the next run in "no prior sync history" state rather than attempting an incremental sync against a now-empty `SyncStateStore`.
-
-`npm run setup:e2e` also removes stale `e2e-*.md` files as a side effect of its local vault setup, but it does not clear IDB or Drive. Use `cleanup:e2e` for routine maintenance between test runs.
-
-The verbose reporter is enabled in `vitest.e2e.config.ts`, so individual test names are shown as they run. `fileParallelism: false` ensures test files run sequentially (required because they share a single Obsidian instance).
+Alternatively, set `AIRSYNC_REFRESH_TOKEN` in the environment to skip the file.
 
 ## Directory layout
 
 ```text
-tests/e2e/
+tests/wdio/
+  single/                    — single-vault test files (*.e2e.ts)
+  cross/                     — cross-vault test files (*.e2e.ts)
   helpers/
-    env.ts                  — vault path constants and env var helpers
-    cli.ts                  — wrappers around the Obsidian CLI
-    gdrive.ts               — GDrive REST API helpers (token management, file polling)
-  global-setup.ts           — Vitest globalSetup: deploy artifacts, configure vaults, reload plugin
-  setup-vault.ts            — One-time interactive setup script (npm run setup:e2e)
-  create-sync.e2e.ts
-  delete-sync.e2e.ts
-  cross-vault-sync.e2e.ts
+    gdrive.ts                — Drive REST API helpers (token management, file polling, cleanup)
+  setup-wdio-token.ts        — interactive OAuth setup script (npm run setup:e2e:wdio)
+tests/vaults/
+  primary/                   — source vault copied to a temp dir for each run
+  peer/                      — source vault copied to a temp dir for each run (cross only)
+wdio.conf.mts                — single-vault wdio config
+wdio.multiremote.conf.mts    — cross-vault wdio config
 ```
-
-## Configuration
-
-| Env var | Default | Purpose |
-|---|---|---|
-| `OBSIDIAN-E2E-ROOT` | `~/obsidian-test` | Parent directory for all test vaults |
-
-The vault name is always `air-sync-e2e`. The vault path is `$OBSIDIAN-E2E-ROOT/air-sync-e2e`.
 
 ## How a test run works
 
-### globalSetup (`global-setup.ts`)
+### Single-vault mode
 
-Runs once before any test file, outside the test worker:
+`wdio-obsidian-service` handles vault setup automatically:
 
-1. Verifies the test vault exists (fails fast with a clear message if `setup:e2e` was never run)
-2. Copies `main.js`, `manifest.json`, and `styles.css` (if present) from the project root into the vault's plugin directory — ensuring the freshly built plugin is installed
-3. Patches `data.json` to set `destructiveSyncThreshold: 100` so the destructive-sync confirmation modal never blocks tests
-4. Opens the vault (`obsidian vault=air-sync-e2e`) and waits 3 s for Obsidian to finish loading
-5. Reloads the plugin (`obsidian plugin:reload obsidian-air-sync`) so the new build is active
+1. Copies `tests/vaults/primary/` to a temp directory
+2. Installs the built plugin into it
+3. Launches Obsidian with a fresh `--user-data-dir`
+4. The `before` hook in `wdio.conf.mts` injects the refresh token into the vault's SecretStorage and calls `initBackend()` directly on the loaded plugin
 
-### Per-test flow
+### Cross-vault mode (multiremote)
 
-Each test file resolves the GDrive vault folder ID in `beforeAll` via `resolveVaultFolder(VAULT_NAME)`, then each test:
+`wdio-obsidian-service` does not handle multiremote capabilities automatically, so `wdio.multiremote.conf.mts` replicates the two steps in its `beforeSession` hook:
 
-1. Creates a uniquely named note (timestamp suffix) using the Obsidian CLI
-2. Polls Google Drive directly to observe the side effect
-3. Cleans up
+1. Calls `launcher.setupVault()` for each capability — copies the vault to a temp dir and installs plugins
+2. Calls `launcher.setupConfigDir()` to write `obsidian.json` and get a `--user-data-dir` path
+3. Injects `--user-data-dir` into each capability's `goog:chromeOptions`
 
-Tests are isolated by unique filenames — no shared state, no ordering dependency.
+Two Obsidian processes then start in parallel. The `before` hook in `wdio.multiremote.conf.mts` ensures the refresh token is in `process.env` for the Drive helpers.
 
-## Helpers reference
+The test file's own `before()` hook handles vault-level initialization (token injection + `initBackend()`) because `executeObsidian` is not registered on multiremote instances.
 
-### `helpers/env.ts`
+### Token injection pattern
 
-- `E2E_ROOT` — resolved vault root directory
-- `VAULT_NAME` — `"air-sync-e2e"`
-- `VAULT_PATH` — full path to the test vault
-- `requireEnv(name)` — reads a required env var, throws if missing
+Both modes must inject the OAuth refresh token into the vault after Obsidian starts because each run uses a fresh `--user-data-dir` (SecretStorage is empty). The test file's `before()` injects the token and calls `initBackend()` directly on the plugin, then polls until `getRemoteFs()` returns a truthy value.
 
-### `helpers/cli.ts`
+### `execVault` — running code inside Obsidian
 
-Thin wrappers around the Obsidian CLI (`obsidian <command>`).
+In multiremote mode, `executeObsidian` is not available on instances returned by `browser.getInstance()`. Tests use a local `execVault` helper instead, which serializes a function and runs it via `br.execute()` using the same `window.wdioObsidianService()` call-site pattern:
 
-- `openVault()` — switches Obsidian to the test vault; waits 3 s for load
-- `createNote(name)` — creates a new note in the active vault via `obsidian create name="<name>"`; triggers the plugin's file-created handler
+```typescript
+function execVault<T>(
+    br: WebdriverIO.Browser,
+    script: (ctx: VaultCtx, ...args: unknown[]) => T | Promise<T>,
+    ...params: unknown[]
+): Promise<T>
+```
 
-### `helpers/gdrive.ts`
+## Test isolation
 
-All GDrive access uses the Drive REST API v3 directly with `fetch`. Tokens are managed internally.
+Each test generates a unique filename using `Date.now()` (e.g. `e2e-cross-create-1745123456789.md`), so tests never collide with each other even within a run.
 
-**Token pipeline:**
+**Local vaults** are fresh for every run — `beforeSession` copies the source vault to a temp directory. After each test, `afterEach` deletes any `e2e-cross-*` and `sync-trigger.md` files from both vault instances.
 
-1. `evalVaultSecret("air-sync-googledrive-refresh-token")` — runs `obsidian eval 'code=app.secretStorage.getSecret(...)'`, strips the `=>` REPL prefix, and JSON-parses the result to extract the raw token string
-2. `getAccessToken()` — exchanges the refresh token via `POST https://auth-smartsync.takezo.dev/google/token/refresh`; caches the access token until 60 s before expiry
-3. All GDrive calls attach the access token as a `Bearer` header
+**Google Drive** is not reset between runs. The suite-level `before()` hook deletes all `e2e-cross-*` files from the Drive vault folder before any test runs, removing stale files left by previous crashed runs. This uses `deleteStaleTestFiles` from the gdrive helper.
 
-**Exported functions:**
+Temp vault directories are removed in `onComplete` after all tests finish.
 
-- `evalVaultSecret(key)` — reads a named secret from the active vault's SecretStorage; returns `null` if not found
-- `resolveVaultFolder(vaultName)` — walks `My Drive / obsidian-air-sync / <sanitized-vault-name>` and returns the Drive folder ID; throws if not found
-- `pollForFile(folderId, filename, timeoutMs?)` — polls every 2 s until a file with the given name appears in the folder; default timeout 30 s
-- `pollForFileGone(fileId, timeoutMs?)` — polls every 2 s until the file is deleted or trashed; default timeout 30 s
+## Triggering sync
 
-The vault folder name on Drive uses the same `sanitizeDbName` the plugin uses: non-alphanumeric characters (except `-`) are replaced with `_`.
+Sync runs automatically when the vault emits a file event (create/modify/delete). Tests use a `triggerSync` helper that creates (or recreates) a throwaway `sync-trigger.md` note, which fires `vault.on('create')` and wakes up `debouncedSync()`.
 
-## Vitest configuration (`vitest.e2e.config.ts`)
+## Conflict test pattern
 
-- `include` — `tests/e2e/**/*.e2e.ts` (separate glob from unit tests)
-- `testTimeout` — 120 s (sync round-trips can take 10–20 s)
-- `hookTimeout` — 30 s
-- `pool: "forks"` — each test file runs in its own process; avoids shared module state between suites
-- `fileParallelism: false` — test files run sequentially (required: tests share a single Obsidian instance)
-- `reporters: ["verbose"]` — individual test names printed as they run
+To create a controlled conflict:
 
-Unit tests (`npm test`) use `vitest.config.ts` and never include `*.e2e.ts` files.
+1. Create the base file in primary and let it propagate to peer.
+2. Pause sync in both vaults by setting `syncPaused = true` on the plugin instance (accessible via `ctx.app.plugins.plugins["air-sync"] as { syncPaused: boolean }`).
+3. Modify the file differently in each vault.
+4. Resume primary and trigger its sync. Use `pollForFileContent` to gate on Drive receiving primary's version.
+5. Resume peer and trigger its sync. The plugin detects a conflict and performs a 3-way merge, writing `<<<<<<< LOCAL` / `=======` / `>>>>>>> REMOTE` markers.
+6. Poll the peer vault for conflict markers, re-triggering sync periodically if Drive lags.
+7. Trigger sync in primary to pull the merged content down.
 
-## Cross-vault sync scenarios
+## Diagnostics
 
-The peer vault (`air-sync-e2e-peer`) shares the primary vault's Drive folder via the
-`remoteVaultFolderName` plugin setting. Both vaults land on the same Drive folder
-(`obsidian-air-sync/air-sync-e2e`) without creating shortcuts or duplicates.
+Set `WDIO_DEBUG=1` in the environment to enable per-poll diagnostic log lines during Obsidian startup:
 
-### One-time peer vault setup
+```text
+[primaryVault] windowApp=true wdioSvc=true svcKeys=[air-sync,...] ...
+```
 
-`npm run setup:e2e` sets up both vaults:
+Set `logLevel: "warn"` in both wdio configs to suppress verbose wdio COMMAND/RESULT/DATA lines while preserving the spec reporter output.
 
-1. Runs the interactive primary vault flow (create, install plugin, OAuth)
-2. Creates `$E2E_ROOT/air-sync-e2e-peer/` and installs the plugin
-3. Writes `data.json` with `remoteVaultFolderName: "air-sync-e2e"` and a `"pending"` placeholder for
-   `remoteVaultFolder` (makes `isConnected()` return true so the plugin resolves the real folder ID on first load)
-4. Opens the peer vault in Obsidian and prompts you to enable community plugins (Obsidian requires this step interactively the first time a vault is opened)
-5. Injects the primary vault's refresh token into the peer vault's SecretStorage via `obsidian eval`
-6. Reloads the plugin (which calls `resolveRemoteVault`, replaces `"pending"` with the real folder ID, and starts syncing)
+## Helpers reference (`tests/wdio/helpers/gdrive.ts`)
 
-`setup:e2e` also deletes any `e2e-*.md` files left behind by previous failed test runs.
+All Drive access uses the Drive REST API v3 with `fetch`. Tokens are exchanged via `POST https://auth-smartsync.takezo.dev/google/token/refresh` and cached until 60 s before expiry.
 
-### Per-run peer vault setup (global-setup.ts)
+| Function | Purpose |
+|---|---|
+| `resolveVaultFolder(vaultName)` | Walks `My Drive / obsidian-air-sync / <sanitized-vault-name>` and returns the Drive folder ID |
+| `pollForFile(folderId, filename, timeoutMs?)` | Polls every 2 s until the file appears; default timeout 30 s |
+| `pollForFileGone(fileId, timeoutMs?)` | Polls every 2 s until the file is deleted or trashed |
+| `pollForFileContent(fileId, text, timeoutMs?)` | Polls every 2 s until the file's content contains `text` |
+| `deleteFile(fileId)` | Deletes a file by ID (404 is treated as success) |
+| `deleteStaleTestFiles(folderId, prefix)` | Lists and deletes all non-trashed files whose name contains `prefix` |
 
-On every `npm run test:e2e` run, if the peer vault plugin directory exists, `global-setup.ts`:
-
-1. Deploys the freshly built plugin to the peer vault
-2. Patches `destructiveSyncThreshold: 100` in `data.json` (preserving all other settings)
-3. Reads the primary vault's refresh token and re-injects it into the peer vault's SecretStorage
-4. Reloads the peer vault's plugin
-5. Switches Obsidian back to the primary vault so tests start there
-
-### How cross-vault tests work
-
-Each test in `cross-vault-sync.e2e.ts` calls `openVault()` / `openPeerVault()` to switch Obsidian
-focus. Switching focus fires the window `focus` event inside Obsidian, which the plugin scheduler
-uses to trigger an immediate `runSync()`. Tests then use `pollForLocalFile` / `pollForLocalFileGone`
-to observe the local filesystem in the peer vault path directly.
+The vault folder name on Drive uses the same `sanitizeDbName` transform the plugin uses: non-alphanumeric characters (except `-`) are replaced with `_`.
 
 ## Adding a new scenario
 
-1. Create `tests/e2e/<scenario>.e2e.ts`
-2. Resolve the vault folder in `beforeAll`; give each test a unique filename using `Date.now()`
-3. Drive events with CLI helpers (`createNote`, etc.) or OS-level operations (`fs.rm` for deletions — Obsidian's file watcher picks these up)
-4. Assert against GDrive using `pollForFile` / `pollForFileGone`
+**Single-vault test:**
+1. Create `tests/wdio/single/<scenario>.e2e.ts`
+2. Use `browser.executeObsidian()` to drive Obsidian
+3. Resolve the vault folder in `before`; use unique filenames (`Date.now()`)
+4. Assert against Drive using `pollForFile` / `pollForFileGone`
 
-For scenarios that modify plugin settings transiently, patch `data.json` in a `beforeAll` and restore it in `afterAll`; then reload the plugin via `execAsync("obsidian plugin:reload obsidian-air-sync")`.
+**Cross-vault test:**
+1. Add a new `it(...)` block to `tests/wdio/cross/cross-vault-sync.e2e.ts`
+2. Use `execVault(primary(), ...)` / `execVault(peer(), ...)` to drive each instance
+3. Use `triggerSync(b)` to wake up sync in a vault after a remote change
+4. Use `waitForVaultFile` / `waitForVaultFileGone` to observe the local vault state
