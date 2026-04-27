@@ -18,6 +18,9 @@ main.js
 # env
 .env
 
+# wdio e2e token (written by npm run setup:e2e:wdio)
+.e2e-refresh-token
+
 # obsidian
 data.json
 
