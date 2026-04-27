@@ -9,6 +9,7 @@ import { readFile } from "node:fs/promises";
 // One-time token setup:  npm run setup:e2e:wdio
 export const config: WebdriverIO.Config = {
 	runner: "local",
+	logLevel: "warn",
 	framework: "mocha",
 	specs: ["./tests/wdio/single/**/*.e2e.ts"],
 	maxInstances: 1,

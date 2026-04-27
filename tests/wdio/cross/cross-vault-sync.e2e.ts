@@ -82,7 +82,7 @@ before(async () => {
 						? Object.keys(a.plugins.plugins) : [],
 				};
 			`) as PluginState;
-			console.log(`[${name}] windowApp=${state.hasWindowApp} wdioSvc=${state.hasSvc} svcKeys=[${state.svcPluginKeys.join(",")}] require=${state.hasRequire} appKeys=[${state.windowAppKeys.join(",")}]`);
+			if (process.env["WDIO_DEBUG"]) console.log(`[${name}] windowApp=${state.hasWindowApp} wdioSvc=${state.hasSvc} svcKeys=[${state.svcPluginKeys.join(",")}] require=${state.hasRequire} appKeys=[${state.windowAppKeys.join(",")}]`);
 			if (state.hasSvc && state.svcPluginKeys.includes("air-sync")) break;
 			await new Promise<void>(r => setTimeout(r, 5_000));
 		}

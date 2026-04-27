@@ -14,6 +14,7 @@ const multiremoteTmpDirs: string[] = [];
 
 export const config: WebdriverIO.MultiremoteConfig = {
 	runner: "local",
+	logLevel: "warn",
 	framework: "mocha",
 	specs: ["./tests/wdio/cross/**/*.e2e.ts"],
 	maxInstances: 1,
