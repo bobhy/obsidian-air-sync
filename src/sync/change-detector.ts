@@ -102,6 +102,8 @@ async function collectHot(deps: ChangeDetectorDeps): Promise<ChangeSet> {
 		if (!prev) return true;
 		// Local deleted but remote still exists (e.g. rename source)
 		if (!e.local && e.remote) return true;
+		// Remote deleted but local still exists — must reach decision engine for delete_local
+		if (e.local && !e.remote) return true;
 		// Local changed
 		if (e.local && hasChanged(e.local, prev)) return true;
 		// Remote changed
