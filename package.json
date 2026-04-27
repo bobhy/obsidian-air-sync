@@ -12,10 +12,6 @@
 		"test": "vitest run",
 		"test:watch": "vitest",
 		"deploy": "node esbuild.config.mjs production && node deploy.mjs",
-		"pretest:e2e": "npm run build",
-		"test:e2e": "vitest run --config vitest.e2e.config.ts",
-		"setup:e2e": "node --import jiti/register tests/e2e/setup-vault.ts",
-		"cleanup:e2e": "node --import jiti/register tests/e2e/cleanup-vaults.ts",
 		"setup:e2e:wdio": "node --import jiti/register tests/wdio/setup-wdio-token.ts",
 		"test:e2e:single": "npm run build && wdio run wdio.conf.mts",
 		"test:e2e:cross": "npm run build && wdio run wdio.multiremote.conf.mts"
